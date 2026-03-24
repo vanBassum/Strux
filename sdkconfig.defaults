@@ -1,0 +1,14 @@
+# Partition table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Flash size and speed
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# HTTP server WebSocket support
+CONFIG_HTTPD_WS_SUPPORT=y
+
+# FAT long filename support (needed for React build output)
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
