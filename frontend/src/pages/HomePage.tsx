@@ -1,4 +1,5 @@
 import { useDeviceInfo } from "@/hooks/use-device-info"
+import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { CpuIcon } from "lucide-react"
 
 function formatBytes(bytes: number): string {
@@ -24,7 +25,13 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
             <Row label="Project" value={info.project} />
-            <Row label="Firmware" value={info.firmware} />
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Firmware</span>
+              <span className="flex items-center gap-2 font-mono">
+                {info.firmware}
+                <PreReleaseBadge version={info.firmware} />
+              </span>
+            </div>
             <Row label="ESP-IDF" value={info.idf} />
             <Row label="Compiled" value={`${info.date} ${info.time}`} />
             <Row label="Chip" value={info.chip} />

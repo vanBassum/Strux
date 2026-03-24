@@ -42,7 +42,7 @@ jobs:
       - name: Build firmware (ESP-IDF)
         uses: espressif/esp-idf-ci-action@v1
         with:
-          idf_version: ${{ env.IDF_VERSION }}
+          esp_idf_version: ${{ env.IDF_VERSION }}
           target: ${{ env.IDF_TARGET }}
           command: |
             set -euo pipefail

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/sidebar"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
 import { useDeviceInfo } from "@/hooks/use-device-info"
+import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 
 const navItems = [
   { title: "Home", icon: HomeIcon, page: "home" as const },
@@ -38,13 +39,6 @@ const statusLabel = {
   disconnected: "Offline",
 } as const
 
-function isBeta(version: string | undefined): boolean {
-  if (!version) return false
-  const parts = version.split(".")
-  const patch = parts[2]
-  return patch !== undefined && patch !== "0"
-}
-
 export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
   const connection = useConnectionStatus()
   const info = useDeviceInfo()
@@ -54,11 +48,7 @@ export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
       <SidebarHeader className="px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">Skeleton</span>
-          {info && isBeta(info.firmware) && (
-            <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none text-amber-500">
-              Beta
-            </span>
-          )}
+          <PreReleaseBadge version={info?.firmware} />
         </div>
       </SidebarHeader>
       <SidebarContent>

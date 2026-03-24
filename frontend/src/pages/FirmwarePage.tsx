@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { backend, type UpdateStatus } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
+import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
@@ -21,7 +22,13 @@ export default function FirmwarePage() {
         <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
           <h2 className="mb-3 text-lg font-semibold">Current Status</h2>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-            <Row label="Version" value={status.firmware} />
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Version</span>
+              <span className="flex items-center gap-2 font-mono">
+                {status.firmware}
+                <PreReleaseBadge version={status.firmware} />
+              </span>
+            </div>
             <Row label="Running" value={status.running} />
             <Row label="Next slot" value={status.nextSlot} />
           </div>
