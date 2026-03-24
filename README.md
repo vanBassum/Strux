@@ -4,6 +4,8 @@ A clean starting point for ESP32 projects with a modern web interface. Clone it,
 
 Skeleton gives you WiFi management, OTA updates, a live log console, persistent settings, and a responsive web UI out of the box. It's designed for homebrew projects where you want to skip the boilerplate and get straight to the interesting part.
 
+<img width="1096" height="591" alt="image" src="https://github.com/user-attachments/assets/cc282e06-f84b-497d-8e5a-3e04add95bac" />
+
 ## What's Included
 
 - **WiFi** — Station mode with automatic AP fallback (`Skeleton-AP`) after failed connections
