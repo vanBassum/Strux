@@ -12,7 +12,7 @@ permissions:
 env:
   IDF_VERSION: "v6.0"
   IDF_TARGET: "esp32"
-  PROJECT_NAME: "Skeleton"
+  PROJECT_NAME: "Stux"
 
 jobs:
   build-and-release:

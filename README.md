@@ -1,18 +1,25 @@
-# Skeleton
+# Stux
 
-A clean starting point for ESP32 projects with a modern web interface. Clone it, rename it, and start building — the plumbing is already done.
+*Start structured. Make it your own.*
 
-Skeleton gives you WiFi management, OTA updates, a live log console, persistent settings, and a responsive web UI out of the box. It's designed for homebrew projects where you want to skip the boilerplate and get straight to the interesting part.
+Stux is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, MQTT with Home Assistant auto-discovery, and the infrastructure to grow your project without fighting your own codebase.
+
+It's not a framework that forces you into rigid patterns. It's a well-organized starting point that you copy, rename, and shape into whatever you're building.
 
 <img width="1096" height="591" alt="image" src="https://github.com/user-attachments/assets/cc282e06-f84b-497d-8e5a-3e04add95bac" />
 
+---
+
 ## What's Included
 
-- **WiFi** — Station mode with automatic AP fallback (`Skeleton-AP`) after failed connections
+- **WiFi** — Station mode with automatic AP fallback (`Stux-AP`) after failed connections
 - **Web UI** — React + TypeScript dashboard served from flash, accessible from any browser
-- **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB required after initial flash
+- **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB after initial flash
+- **MQTT** — Connects to any MQTT broker with automatic Home Assistant device discovery
 - **Live Console** — Stream device logs to the browser in real time over WebSocket
-- **Settings** — Key/value store backed by NVS with a dynamic settings page in the UI
+- **Settings** — Key/value store backed by NVS with a dynamic settings UI
+- **Status LED** — Visual boot/connection feedback via GPIO, configurable per board
+- **Time Sync** — SNTP client with timezone support
 - **Modular Architecture** — Service provider pattern with isolated managers, easy to extend
 
 ## Tech Stack
@@ -24,11 +31,51 @@ Skeleton gives you WiFi management, OTA updates, a live log console, persistent 
 | Target | ESP32 (4 MB flash) |
 | CI/CD | GitHub Actions — builds firmware + frontend, publishes releases |
 
-## Key Directories
+---
 
-- **`main/`** — ESP-IDF firmware. Application managers live in `Application/`, reusable utilities in `lib/`. This is where your device logic goes.
-- **`frontend/`** — React web UI. Built with Vite, outputs to `www/`. This is a standard Node project — `pnpm install && pnpm dev` to work on it.
-- **`www/`** — Build output from the frontend, gzipped and embedded into a FAT partition on flash at build time. Don't edit files here directly.
+## Project Structure
+
+```
+Stux/
+├── main/                              # ESP-IDF firmware
+│   ├── main.cpp                       # Boot sequence
+│   ├── Application/                   # Application logic (managers)
+│   │   ├── ApplicationContext.h       # Service locator — owns all managers
+│   │   ├── ServiceProvider.h          # Dependency injection interface
+│   │   ├── CommandManager/            # WebSocket RPC dispatch
+│   │   ├── LogManager/               # Log capture + WebSocket broadcast
+│   │   ├── MqttManager/              # MQTT + Home Assistant discovery
+│   │   ├── NetworkManager/            # WiFi STA/AP with retry and fallback
+│   │   ├── SettingsManager/           # NVS key-value store
+│   │   ├── TimeManager/              # SNTP + timezone
+│   │   ├── UpdateManager/            # OTA firmware + www partition
+│   │   └── WebServerManager/         # HTTP + WebSocket server
+│   ├── hardware/                      # Board-specific code
+│   │   ├── BoardConfig.h             # Pin definitions — edit for your board
+│   │   └── StatusLed.h               # Example driver: GPIO status LED
+│   └── lib/                           # Reusable utilities
+│       ├── common/                    # Stream, BufferStream, EnumOperators
+│       ├── json/                      # JsonWriter, JsonHelpers
+│       ├── rtos/                      # Task, Mutex, Timer, InitState
+│       └── system/                    # DateTime, TimeSpan
+├── frontend/                          # React web UI (Vite + Tailwind + shadcn)
+├── www/                               # Build output — gzipped, embedded in flash
+├── CMakeLists.txt                     # Root ESP-IDF project config
+├── partitions.csv                     # Flash partition layout
+└── sdkconfig.defaults                 # ESP-IDF defaults
+```
+
+### The key separation
+
+| Folder | Contains | Changes when you... |
+|--------|----------|---------------------|
+| `hardware/` | Pin definitions, board-specific drivers, display/peripheral setup | Swap the board or add a peripheral |
+| `Application/` | Managers, business logic, orchestration, commands | Add features or change behavior |
+| `lib/` | RTOS wrappers, JSON, time utilities | Rarely — these are stable building blocks |
+
+**Rule of thumb:** if the code changes when you swap the board, it belongs in `hardware/`. If it changes when you add a feature, it belongs in `Application/`.
+
+---
 
 ## Getting Started
 
@@ -56,6 +103,18 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 The frontend is compiled, gzipped, and embedded into a FAT partition on flash. No SD card or external storage needed.
 
+### Flash from Browser (no toolchain needed)
+
+If you just want to flash a pre-built release without installing ESP-IDF, you can use the **ESP Web Flasher** directly from your browser:
+
+1. Download the latest `Stux-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Stux/releases)
+2. Open [ESP Web Flasher](https://espressif.github.io/esptool-js/)
+3. Connect your ESP32 via USB
+4. Select the serial port, set flash offset to `0x0`, and upload the factory binary
+5. Click **Program** — done
+
+This works in Chrome and Edge. No drivers or build tools required.
+
 ### Development
 
 For frontend development with hot reload against a running device:
@@ -67,6 +126,8 @@ pnpm dev
 
 Vite's dev server will proxy WebSocket connections to the device. Edit React components and see changes instantly.
 
+---
+
 ## Architecture
 
 All managers follow the same pattern: they receive a `ServiceProvider&` reference at construction and initialize via `Init()`. This gives you dependency injection without a framework.
@@ -77,25 +138,79 @@ ApplicationContext (owns everything)
 ├── SettingsManager     — NVS read/write with typed accessors
 ├── NetworkManager      — WiFi STA/AP with retry and fallback
 │   └── WiFiInterface   — ESP WiFi abstraction (swappable for Ethernet)
+├── TimeManager         — SNTP time sync with timezone support
 ├── CommandManager      — Routes JSON commands to handlers
+├── MqttManager         — MQTT client with Home Assistant auto-discovery
 ├── UpdateManager       — OTA writes to app or www partition
 └── WebServerManager    — HTTP + WebSocket server, static file serving
     ├── StaticFileHandler
     └── WebSocketHandler
 ```
 
-### Adding a New Manager
+### Boot sequence (main.cpp)
 
-1. Create a new directory under `main/Application/YourManager/`
-2. Implement your manager class, accepting `ServiceProvider&` in the constructor
-3. Add it to `ServiceProvider.h` (forward declare + virtual getter)
-4. Add it to `ApplicationContext.h` (member + getter implementation)
-5. Call `Init()` from `main.cpp`
-6. Register source files in `main/CMakeLists.txt`
+```cpp
+// Status LED: fast blink while booting
+g_statusLed.Init();
+g_statusLed.SetPattern(StatusLed::Pattern::FastBlink);
 
-### Adding a New Command
+// Core services
+g_appContext.getLogManager().Init();
+g_appContext.getSettingsManager().Init();
+g_appContext.getNetworkManager().Init();
+g_appContext.getTimeManager().Init();
 
-Commands are dispatched by `CommandManager`. Add an entry to the command table with a type string and handler function. The handler receives a JSON payload and writes its response to a `JsonWriter`. The frontend can call it via the WebSocket RPC layer in `backend.ts`.
+// Application services
+g_appContext.getCommandManager().Init();
+g_appContext.getMqttManager().Init();
+g_appContext.getUpdateManager().Init();
+g_appContext.getWebServerManager().Init();
+
+// LED indicates WiFi state
+if (g_appContext.getNetworkManager().IsAccessPoint())
+    g_statusLed.SetPattern(StatusLed::Pattern::SlowBlink);
+else
+    g_statusLed.SetPattern(StatusLed::Pattern::Solid);
+```
+
+---
+
+## Home Assistant Integration
+
+When MQTT is enabled and a broker is configured, Stux automatically publishes [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) messages. Your device appears in Home Assistant without manual configuration.
+
+**Built-in entities:**
+
+| Entity | Type | Description |
+|--------|------|-------------|
+| IP Address | Sensor | Device IP (diagnostic) |
+| WiFi Signal | Sensor | RSSI in dBm (diagnostic) |
+| Uptime | Sensor | Seconds since boot (diagnostic) |
+| Free Heap | Sensor | Available RAM in bytes (diagnostic) |
+| Reboot | Button | Restart the device remotely |
+
+Projects can publish additional entities by calling `MqttManager::Publish()` and adding discovery configs in `PublishDiscovery()`.
+
+**MQTT Settings** (configurable via web UI):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `mqtt.enabled` | off | Enable MQTT connection |
+| `mqtt.broker` | — | Broker hostname or IP |
+| `mqtt.port` | 1883 | Broker port |
+| `mqtt.user` | — | Username (optional) |
+| `mqtt.pass` | — | Password (optional) |
+| `mqtt.prefix` | stux | Topic prefix (`{prefix}/{device_id}/...`) |
+
+**Topic structure:**
+
+```
+{prefix}/{device_id}/status    → "online" / "offline" (LWT)
+{prefix}/{device_id}/state     → JSON with sensor values
+{prefix}/{device_id}/set/#     → Incoming commands (e.g. set/reboot)
+```
+
+---
 
 ## OTA Updates
 
@@ -108,27 +223,112 @@ The CI pipeline produces three artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `Skeleton-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash via USB |
-| `Skeleton-app.bin` | Firmware only, for OTA update via web UI |
-| `Skeleton-www.bin` | Web UI only, for updating the frontend independently |
+| `Stux-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
+| `Stux-app.bin` | Firmware only, for OTA update via web UI |
+| `Stux-www.bin` | Web UI only, for updating the frontend independently |
+
+---
 
 ## WiFi Behavior
 
 1. On boot, attempts to connect to the configured WiFi network (stored in NVS)
 2. Retries up to 3 times on failure
-3. Falls back to an open access point (`Skeleton-AP`) if all retries fail
-4. Connect to the AP and access the web UI at the device's IP to configure WiFi credentials
+3. Falls back to an open access point (`Stux-AP`) if all retries fail
+4. Connect to the AP and access the web UI to configure WiFi credentials
+
+The status LED reflects connection state:
+- **Fast blink** — Booting / initializing
+- **Solid** — Connected to WiFi
+- **Slow blink** — Running in AP fallback mode
+
+---
+
+## Settings
+
+All settings are stored in NVS (non-volatile storage) and configurable through the web UI's Settings page. The settings table is defined in [`SettingsDefs.h`](main/Application/SettingsManager/SettingsDefs.h):
+
+```cpp
+inline const SettingDef SETTINGS_DEFS[] = {
+    { "wifi.ssid",      SettingType::String, "WiFi SSID",      "" },
+    { "wifi.password",  SettingType::String, "WiFi Password",  "" },
+    { "device.name",    SettingType::String, "Device Name",    "Stux" },
+    { "mqtt.enabled",   SettingType::Bool,   "MQTT Enabled",   "0" },
+    { "mqtt.broker",    SettingType::String, "MQTT Broker",    "" },
+    // ... add your own settings here
+};
+```
+
+The web UI auto-generates form fields for each entry. Adding a new setting is one line.
+
+---
+
+## Hardware Layer
+
+The `hardware/` directory contains everything that changes when you swap the board or add a peripheral.
+
+### BoardConfig.h
+
+Edit [`BoardConfig.h`](main/hardware/BoardConfig.h) to match your board's pin assignments:
+
+```cpp
+namespace BoardConfig
+{
+    static constexpr int STATUS_LED_PIN = 2;          // GPIO2 on most ESP32 DevKits
+    static constexpr bool STATUS_LED_ACTIVE_HIGH = true;
+
+    // Add your pins:
+    // static constexpr int MODBUS_TX_PIN = 17;
+    // static constexpr int SPI_MOSI_PIN  = 13;
+}
+```
+
+### StatusLed (example driver)
+
+[`StatusLed.h`](main/hardware/StatusLed.h) is a minimal but functional hardware driver included as a starting point. It demonstrates:
+
+- Reading pin configuration from `BoardConfig.h`
+- Using `lib/rtos` (Timer) for blink patterns
+- A clean, self-contained driver API
+
+Use this as a pattern when adding your own drivers (display, sensors, motor control, etc.).
+
+---
 
 ## Making It Yours
 
-This is a skeleton — rename it and build on top of it:
+This is a template — copy it, rename it, and build on top of it:
 
-1. **Rename the project** in `CMakeLists.txt` and `.github/workflows/release.yml`
-2. **Add your hardware drivers** under `main/lib/` or as ESP-IDF components
-3. **Add your application logic** as a new manager (see [Adding a New Manager](#adding-a-new-manager))
-4. **Extend the web UI** — add pages in `frontend/src/pages/`, register routes in the sidebar
-5. **Add commands** for your features so the frontend can interact with them
-6. **Customize settings** by adding entries to the settings definition table in `SettingsManager`
+1. **Rename the project** in `CMakeLists.txt` (`project(YourProject)`) and `.github/workflows/release.yml`
+2. **Update `BoardConfig.h`** with your board's pin assignments
+3. **Add your hardware drivers** in `hardware/` (display drivers, sensor interfaces, protocol adapters)
+4. **Add your application logic** as new managers in `Application/` (see below)
+5. **Extend the web UI** — add pages in `frontend/src/pages/`, register routes in the sidebar
+6. **Add commands** for your features so the frontend and MQTT can interact with them
+7. **Add settings** by adding entries to `SettingsDefs.h`
+
+### Adding a New Manager
+
+1. Create a new directory under `Application/YourManager/`
+2. Implement your manager class, accepting `ServiceProvider&` in the constructor
+3. Add it to `ServiceProvider.h` (forward declare + virtual getter)
+4. Add it to `ApplicationContext.h` (member + getter implementation)
+5. Call `Init()` from `main.cpp`
+6. Register source files in `main/CMakeLists.txt`
+
+### Adding a New Command
+
+Commands are dispatched by `CommandManager`. Add an entry to the command table with a type string and handler function. The handler receives a JSON payload and writes its response to a `JsonWriter`. The frontend calls it via the WebSocket RPC layer in `backend.ts`.
+
+### Adding a Hardware Driver
+
+1. Define pins in `hardware/BoardConfig.h`
+2. Create your driver in `hardware/` (e.g., `hardware/display/MyDisplay.h`)
+3. Use the driver from your manager in `Application/`
+4. Add include paths and component dependencies in `main/CMakeLists.txt`
+
+See [`StatusLed.h`](main/hardware/StatusLed.h) for a complete example.
+
+---
 
 ## License
 

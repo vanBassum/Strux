@@ -11,6 +11,10 @@ set(SOURCE_FILES_LIST
     "Application/UpdateManager/UpdateManager.cpp"
     "Application/SettingsManager/SettingsManager.cpp"
     "Application/LogManager/LogManager.cpp"
+    "Application/TimeManager/TimeManager.cpp"
+    "Application/MqttManager/MqttManager.cpp"
+    "lib/system/DateTime.cpp"
+    "lib/system/TimeSpan.cpp"
 )
 
 set(INCLUDE_DIRS_LIST
@@ -22,10 +26,14 @@ set(INCLUDE_DIRS_LIST
     "Application/UpdateManager"
     "Application/SettingsManager"
     "Application/LogManager"
+    "Application/TimeManager"
+    "Application/MqttManager"
+    "hardware"
     "lib"
     "lib/common"
     "lib/rtos"
     "lib/json"
+    "lib/system"
 )
 
 set(COMPONENT_REQUIRES
@@ -40,6 +48,8 @@ set(COMPONENT_REQUIRES
     esp_partition
     fatfs
     wear_levelling
+    esp_driver_gpio
+    espressif__mqtt
 )
 
 # Register component with ESP-IDF

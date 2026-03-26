@@ -6,7 +6,7 @@ export interface ReleaseInfo {
   url: string
 }
 
-const REPO = "vanBassum/ESPSkeleton"
+const REPO = "vanBassum/Stux"
 
 export function useLatestRelease() {
   const [release, setRelease] = useState<ReleaseInfo | null>(null)
