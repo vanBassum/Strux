@@ -12,7 +12,7 @@ class NetworkManager {
     static constexpr int StaConnectTimeoutMs = 10000;
     static constexpr int MaxStaRetries = 3;
 
-    static constexpr const char* DefaultApSsid = "Stux-AP";
+    static constexpr const char* DefaultApSsid = "Strux-AP";
     static constexpr const char* DefaultApPassword = ""; // Open network
 
 public:

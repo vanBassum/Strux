@@ -1,8 +1,8 @@
-# Stux
+# Strux
 
 *Start structured. Make it your own.*
 
-Stux is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, MQTT with Home Assistant auto-discovery, and the infrastructure to grow your project without fighting your own codebase.
+Strux is a flexible foundation for building embedded applications on ESP32. It gives you a clean, modular starting point with WiFi, a web UI, OTA updates, MQTT with Home Assistant auto-discovery, and the infrastructure to grow your project without fighting your own codebase.
 
 It's not a framework that forces you into rigid patterns. It's a well-organized starting point that you copy, rename, and shape into whatever you're building.
 
@@ -12,13 +12,12 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 
 ## What's Included
 
-- **WiFi** — Station mode with automatic AP fallback (`Stux-AP`) after failed connections
+- **WiFi** — Station mode with automatic AP fallback (`Strux-AP`) after failed connections
 - **Web UI** — React + TypeScript dashboard served from flash, accessible from any browser
 - **OTA Updates** — Dual-partition firmware updates and independent web UI updates, no USB after initial flash
 - **MQTT** — Connects to any MQTT broker with automatic Home Assistant device discovery
 - **Live Console** — Stream device logs to the browser in real time over WebSocket
 - **Settings** — Key/value store backed by NVS with a dynamic settings UI
-- **Status LED** — Visual boot/connection feedback via GPIO, configurable per board
 - **Time Sync** — SNTP client with timezone support
 - **Modular Architecture** — Service provider pattern with isolated managers, easy to extend
 
@@ -36,13 +35,14 @@ It's not a framework that forces you into rigid patterns. It's a well-organized 
 ## Project Structure
 
 ```
-Stux/
+Strux/
 ├── main/                              # ESP-IDF firmware
-│   ├── main.cpp                       # Boot sequence
+│   ├── main.cpp                       # Boot sequence — just Init() calls
 │   ├── Application/                   # Application logic (managers)
 │   │   ├── ApplicationContext.h       # Service locator — owns all managers
 │   │   ├── ServiceProvider.h          # Dependency injection interface
 │   │   ├── CommandManager/            # WebSocket RPC dispatch
+│   │   ├── DeviceManager/            # Hardware driver instances + HA entities
 │   │   ├── LogManager/               # Log capture + WebSocket broadcast
 │   │   ├── MqttManager/              # MQTT + Home Assistant discovery
 │   │   ├── NetworkManager/            # WiFi STA/AP with retry and fallback
@@ -52,7 +52,7 @@ Stux/
 │   │   └── WebServerManager/         # HTTP + WebSocket server
 │   ├── hardware/                      # Board-specific code
 │   │   ├── BoardConfig.h             # Pin definitions — edit for your board
-│   │   └── StatusLed.h               # Example driver: GPIO status LED
+│   │   └── Led.h                     # GPIO LED driver (HA-controllable)
 │   └── lib/                           # Reusable utilities
 │       ├── common/                    # Stream, BufferStream, EnumOperators
 │       ├── json/                      # JsonWriter, JsonHelpers
@@ -102,7 +102,7 @@ If pnpm is not available, the firmware still builds — you just won't have a we
 
 If you just want to flash a pre-built release without installing ESP-IDF, you can use the **ESP Web Flasher** directly from your browser:
 
-1. Download the latest `Stux-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Stux/releases)
+1. Download the latest `Strux-factory.bin` from [GitHub Releases](https://github.com/vanBassum/Strux/releases)
 2. Open [ESP Web Flasher](https://espressif.github.io/esptool-js/)
 3. Connect your ESP32 via USB
 4. Select the serial port, set flash offset to `0x0`, and upload the factory binary
@@ -136,6 +136,7 @@ ApplicationContext (owns everything)
 ├── TimeManager         — SNTP time sync with timezone support
 ├── CommandManager      — Routes JSON commands to handlers
 ├── MqttManager         — MQTT client with Home Assistant auto-discovery
+├── DeviceManager       — Hardware driver instances (LED, sensors, etc.)
 ├── UpdateManager       — OTA writes to app or www partition
 └── WebServerManager    — HTTP + WebSocket server, static file serving
     ├── StaticFileHandler
@@ -145,46 +146,58 @@ ApplicationContext (owns everything)
 ### Boot sequence (main.cpp)
 
 ```cpp
-// Status LED: fast blink while booting
-g_statusLed.Init();
-g_statusLed.SetPattern(StatusLed::Pattern::FastBlink);
-
-// Core services
 g_appContext.getLogManager().Init();
 g_appContext.getSettingsManager().Init();
 g_appContext.getNetworkManager().Init();
 g_appContext.getTimeManager().Init();
-
-// Application services
 g_appContext.getCommandManager().Init();
 g_appContext.getMqttManager().Init();
+g_appContext.getDeviceManager().Init();
 g_appContext.getUpdateManager().Init();
 g_appContext.getWebServerManager().Init();
-
-// LED indicates WiFi state
-if (g_appContext.getNetworkManager().IsAccessPoint())
-    g_statusLed.SetPattern(StatusLed::Pattern::SlowBlink);
-else
-    g_statusLed.SetPattern(StatusLed::Pattern::Solid);
 ```
+
+The `main.cpp` stays clean — just `Init()` calls. Hardware drivers live in the `DeviceManager`, which registers them with MQTT for Home Assistant control.
 
 ---
 
 ## Home Assistant Integration
 
-When MQTT is enabled and a broker is configured, Stux automatically publishes [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) messages. Your device appears in Home Assistant without manual configuration.
+When MQTT is enabled and a broker is configured, Strux automatically publishes [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) messages. Your device appears in Home Assistant without manual configuration.
 
 **Built-in entities:**
 
 | Entity | Type | Description |
 |--------|------|-------------|
+| LED | Light | On/off control of the board LED |
 | IP Address | Sensor | Device IP (diagnostic) |
 | WiFi Signal | Sensor | RSSI in dBm (diagnostic) |
 | Uptime | Sensor | Seconds since boot (diagnostic) |
 | Free Heap | Sensor | Available RAM in bytes (diagnostic) |
 | Reboot | Button | Restart the device remotely |
 
-Projects can publish additional entities by calling `MqttManager::Publish()` and adding discovery configs in `PublishDiscovery()`.
+### Adding your own HA entities
+
+The `MqttManager` is extensible. Any manager can register commands and discovery configs:
+
+```cpp
+// In your manager's Init():
+auto& mqtt = serviceProvider_.getMqttManager();
+
+// Handle commands from HA
+mqtt.RegisterCommand("my_thing", [this](const char* data, int len) {
+    // handle ON/OFF or JSON payload
+});
+
+// Register HA discovery (called on every MQTT connect)
+mqtt.RegisterDiscovery([this]() {
+    auto& mqtt = serviceProvider_.getMqttManager();
+    mqtt.PublishEntityDiscovery("switch", "my_thing", [&mqtt](JsonWriter& json) {
+        json.field("name", "My Thing");
+        // ... entity-specific fields
+    });
+});
+```
 
 **MQTT Settings** (configurable via web UI):
 
@@ -195,14 +208,14 @@ Projects can publish additional entities by calling `MqttManager::Publish()` and
 | `mqtt.port` | 1883 | Broker port |
 | `mqtt.user` | — | Username (optional) |
 | `mqtt.pass` | — | Password (optional) |
-| `mqtt.prefix` | stux | Topic prefix (`{prefix}/{device_id}/...`) |
+| `mqtt.prefix` | strux | Topic prefix (`{prefix}/{device_id}/...`) |
 
 **Topic structure:**
 
 ```
 {prefix}/{device_id}/status    → "online" / "offline" (LWT)
 {prefix}/{device_id}/state     → JSON with sensor values
-{prefix}/{device_id}/set/#     → Incoming commands (e.g. set/reboot)
+{prefix}/{device_id}/set/#     → Incoming commands (e.g. set/reboot, set/led)
 ```
 
 ---
@@ -218,9 +231,9 @@ The CI pipeline produces three artifacts per release:
 
 | File | Purpose |
 |------|---------|
-| `Stux-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
-| `Stux-app.bin` | Firmware only, for OTA update via web UI |
-| `Stux-www.bin` | Web UI only, for updating the frontend independently |
+| `Strux-factory.bin` | Full image (bootloader + partitions + app + www) for initial flash |
+| `Strux-app.bin` | Firmware only, for OTA update via web UI |
+| `Strux-www.bin` | Web UI only, for updating the frontend independently |
 
 ---
 
@@ -228,13 +241,8 @@ The CI pipeline produces three artifacts per release:
 
 1. On boot, attempts to connect to the configured WiFi network (stored in NVS)
 2. Retries up to 3 times on failure
-3. Falls back to an open access point (`Stux-AP`) if all retries fail
+3. Falls back to an open access point (`Strux-AP`) if all retries fail
 4. Connect to the AP and access the web UI to configure WiFi credentials
-
-The status LED reflects connection state:
-- **Fast blink** — Booting / initializing
-- **Solid** — Connected to WiFi
-- **Slow blink** — Running in AP fallback mode
 
 ---
 
@@ -246,14 +254,14 @@ All settings are stored in NVS (non-volatile storage) and configurable through t
 inline const SettingDef SETTINGS_DEFS[] = {
     { "wifi.ssid",      SettingType::String, "WiFi SSID",      "" },
     { "wifi.password",  SettingType::String, "WiFi Password",  "" },
-    { "device.name",    SettingType::String, "Device Name",    "Stux" },
+    { "device.name",    SettingType::String, "Device Name",    "Strux" },
     { "mqtt.enabled",   SettingType::Bool,   "MQTT Enabled",   "0" },
     { "mqtt.broker",    SettingType::String, "MQTT Broker",    "" },
     // ... add your own settings here
 };
 ```
 
-The web UI auto-generates form fields for each entry. Adding a new setting is one line.
+The web UI auto-generates form fields for each entry, grouped by prefix. Adding a new setting is one line.
 
 ---
 
@@ -268,8 +276,8 @@ Edit [`BoardConfig.h`](main/hardware/BoardConfig.h) to match your board's pin as
 ```cpp
 namespace BoardConfig
 {
-    static constexpr int STATUS_LED_PIN = 2;          // GPIO2 on most ESP32 DevKits
-    static constexpr bool STATUS_LED_ACTIVE_HIGH = true;
+    static constexpr int LED_PIN = 2;             // GPIO2 on most ESP32 DevKits
+    static constexpr bool LED_ACTIVE_HIGH = true;
 
     // Add your pins:
     // static constexpr int MODBUS_TX_PIN = 17;
@@ -277,15 +285,20 @@ namespace BoardConfig
 }
 ```
 
-### StatusLed (example driver)
+### DeviceManager
 
-[`StatusLed.h`](main/hardware/StatusLed.h) is a minimal but functional hardware driver included as a starting point. It demonstrates:
+The [`DeviceManager`](main/Application/DeviceManager/) owns hardware driver instances and wires them up to MQTT/HA. The included [`Led`](main/hardware/Led.h) driver is registered as a Home Assistant `light` entity — you can turn it on/off from HA.
 
-- Reading pin configuration from `BoardConfig.h`
-- Using `lib/rtos` (Timer) for blink patterns
-- A clean, self-contained driver API
+This is where you add your project-specific hardware:
 
-Use this as a pattern when adding your own drivers (display, sensors, motor control, etc.).
+```cpp
+class DeviceManager {
+    Led led_;
+    // Add your drivers:
+    // DPS5020 dps5020_;
+    // TemperatureSensor sensor_;
+};
+```
 
 ---
 
@@ -295,10 +308,10 @@ This is a template — copy it, rename it, and build on top of it:
 
 1. **Rename the project** in `CMakeLists.txt` (`project(YourProject)`) and `.github/workflows/release.yml`
 2. **Update `BoardConfig.h`** with your board's pin assignments
-3. **Add your hardware drivers** in `hardware/` (display drivers, sensor interfaces, protocol adapters)
-4. **Add your application logic** as new managers in `Application/` (see below)
-5. **Extend the web UI** — add pages in `frontend/src/pages/`, register routes in the sidebar
-6. **Add commands** for your features so the frontend and MQTT can interact with them
+3. **Add hardware drivers** in `hardware/` and instantiate them in `DeviceManager`
+4. **Add application logic** as new managers in `Application/`
+5. **Register HA entities** via `MqttManager::RegisterCommand()` and `RegisterDiscovery()`
+6. **Extend the web UI** — add pages in `frontend/src/pages/`, register routes in the sidebar
 7. **Add settings** by adding entries to `SettingsDefs.h`
 
 ### Adding a New Manager
@@ -318,10 +331,10 @@ Commands are dispatched by `CommandManager`. Add an entry to the command table w
 
 1. Define pins in `hardware/BoardConfig.h`
 2. Create your driver in `hardware/` (e.g., `hardware/display/MyDisplay.h`)
-3. Use the driver from your manager in `Application/`
+3. Instantiate it in `DeviceManager` and wire up MQTT entities if needed
 4. Add include paths and component dependencies in `main/CMakeLists.txt`
 
-See [`StatusLed.h`](main/hardware/StatusLed.h) for a complete example.
+See [`Led.h`](main/hardware/Led.h) and [`DeviceManager.cpp`](main/Application/DeviceManager/DeviceManager.cpp) for a complete example.
 
 ---
 

@@ -7,11 +7,11 @@
 
 namespace BoardConfig
 {
-    // Status LED
+    // LED
     // GPIO2 is the built-in LED on most ESP32 DevKit boards.
-    // Set to -1 if the board has no status LED.
-    static constexpr int STATUS_LED_PIN = 2;
-    static constexpr bool STATUS_LED_ACTIVE_HIGH = true;
+    // Set to -1 if the board has no LED.
+    static constexpr int LED_PIN = 2;
+    static constexpr bool LED_ACTIVE_HIGH = true;
 
     // Add project-specific pin definitions below.
     // Examples:

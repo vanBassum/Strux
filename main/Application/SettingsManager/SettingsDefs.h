@@ -12,7 +12,7 @@ inline const SettingDef SETTINGS_DEFS[] = {
     { "wifi.password",  SettingType::String, "WiFi Password",  "" },
 
     // Device
-    { "device.name",    SettingType::String, "Device Name",    "Stux" },
+    { "device.name",    SettingType::String, "Device Name",    "Strux" },
 
     // MQTT
     { "mqtt.enabled",   SettingType::Bool,   "MQTT Enabled",   "0" },
@@ -20,7 +20,7 @@ inline const SettingDef SETTINGS_DEFS[] = {
     { "mqtt.port",      SettingType::Int,    "MQTT Port",      "1883" },
     { "mqtt.user",      SettingType::String, "MQTT User",      "" },
     { "mqtt.pass",      SettingType::String, "MQTT Password",  "" },
-    { "mqtt.prefix",    SettingType::String, "MQTT Prefix",    "stux" },
+    { "mqtt.prefix",    SettingType::String, "MQTT Prefix",    "strux" },
 
     // NTP
     { "ntp.server",     SettingType::String, "NTP Server",     "pool.ntp.org" },

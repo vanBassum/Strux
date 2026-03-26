@@ -46,7 +46,7 @@ void MqttManager::Init()
     char prefix[32] = {};
     serviceProvider_.getSettingsManager().getString("mqtt.prefix", prefix, sizeof(prefix));
     if (prefix[0] == '\0')
-        snprintf(prefix, sizeof(prefix), "stux");
+        snprintf(prefix, sizeof(prefix), "strux");
     snprintf(baseTopic_, sizeof(baseTopic_), "%s/%s", prefix, deviceId_);
 
     StartClient();
@@ -68,6 +68,37 @@ void MqttManager::BuildDeviceId()
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(deviceId_, sizeof(deviceId_), "%02x%02x%02x%02x",
              mac[2], mac[3], mac[4], mac[5]);
+}
+
+// ──────────────────────────────────────────────────────────────
+// Registration (for other managers to add entities & commands)
+// ──────────────────────────────────────────────────────────────
+
+void MqttManager::RegisterCommand(const char *name, MqttCommandHandler handler)
+{
+    if (cmdHandlerCount_ >= MAX_COMMAND_HANDLERS)
+    {
+        ESP_LOGE(TAG, "Command handler table full");
+        return;
+    }
+    auto &entry = cmdHandlers_[cmdHandlerCount_++];
+    strncpy(entry.name, name, sizeof(entry.name) - 1);
+    entry.handler = handler;
+}
+
+void MqttManager::RegisterDiscovery(std::function<void()> callback)
+{
+    if (discoveryCallbackCount_ >= MAX_DISCOVERY_CALLBACKS)
+    {
+        ESP_LOGE(TAG, "Discovery callback table full");
+        return;
+    }
+    discoveryCallbacks_[discoveryCallbackCount_++] = callback;
+
+    // If already connected, publish immediately so late registrations
+    // don't miss the initial discovery window.
+    if (connected_)
+        callback();
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -190,12 +221,26 @@ void MqttManager::HandleCommand(const char *topic, int topicLen,
 
     ESP_LOGI(TAG, "Command: %s", cmd);
 
+    // Built-in commands
     if (strcmp(cmd, "reboot") == 0)
     {
         ESP_LOGI(TAG, "Reboot requested via MQTT");
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
+        return;
     }
+
+    // Registered command handlers
+    for (int i = 0; i < cmdHandlerCount_; i++)
+    {
+        if (strcmp(cmd, cmdHandlers_[i].name) == 0)
+        {
+            cmdHandlers_[i].handler(data, dataLen);
+            return;
+        }
+    }
+
+    ESP_LOGW(TAG, "Unknown command: %s", cmd);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -251,10 +296,6 @@ void MqttManager::PublishState()
 
 // ──────────────────────────────────────────────────────────────
 // Home Assistant MQTT Discovery
-//
-// On connect, publishes config messages so that Home Assistant
-// automatically discovers this device and its entities.
-// See: https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery
 // ──────────────────────────────────────────────────────────────
 
 static void WriteDeviceBlock(JsonWriter &json, const char *deviceId,
@@ -264,16 +305,53 @@ static void WriteDeviceBlock(JsonWriter &json, const char *deviceId,
 
     json.fieldArray("ids");
     char id[32];
-    snprintf(id, sizeof(id), "stux_%s", deviceId);
+    snprintf(id, sizeof(id), "strux_%s", deviceId);
     json.value(id);
     json.endArray();
 
     json.field("name", deviceName);
-    json.field("mf", "Stux");
+    json.field("mf", "Strux");
     json.field("mdl", CONFIG_IDF_TARGET);
     json.field("sw", version);
 
     json.endObject();
+}
+
+void MqttManager::PublishEntityDiscovery(const char *component, const char *objectId,
+                                          std::function<void(JsonWriter &)> writeFields)
+{
+    if (!connected_ || !client_)
+        return;
+
+    const esp_app_desc_t *app = esp_app_get_description();
+
+    char deviceName[32] = {};
+    serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
+    if (deviceName[0] == '\0')
+        snprintf(deviceName, sizeof(deviceName), "Strux");
+
+    char availTopic[128];
+    snprintf(availTopic, sizeof(availTopic), "%s/status", baseTopic_);
+
+    char configTopic[192];
+    snprintf(configTopic, sizeof(configTopic),
+             "homeassistant/%s/%s/%s/config", component, deviceId_, objectId);
+
+    char uid[64];
+    snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, objectId);
+
+    char buf[512];
+    BufferStream stream(buf, sizeof(buf));
+    JsonWriter json(stream);
+
+    json.beginObject();
+    json.field("uniq_id", uid);
+    json.field("avty_t", availTopic);
+    WriteDeviceBlock(json, deviceId_, deviceName, app->version);
+    writeFields(json);
+    json.endObject();
+
+    esp_mqtt_client_publish(client_, configTopic, buf, 0, 1, 1);
 }
 
 void MqttManager::PublishDiscovery()
@@ -283,7 +361,7 @@ void MqttManager::PublishDiscovery()
     char deviceName[32] = {};
     serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
-        snprintf(deviceName, sizeof(deviceName), "Stux");
+        snprintf(deviceName, sizeof(deviceName), "Strux");
 
     char stateTopic[128];
     snprintf(stateTopic, sizeof(stateTopic), "%s/state", baseTopic_);
@@ -298,9 +376,9 @@ void MqttManager::PublishDiscovery()
         const char *objectId;
         const char *name;
         const char *valueTemplate;
-        const char *deviceClass; // nullptr if none
-        const char *unit;        // nullptr if none
-        const char *icon;        // nullptr if none
+        const char *deviceClass;
+        const char *unit;
+        const char *icon;
     };
 
     static const SensorDef sensors[] = {
@@ -325,7 +403,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", s.name);
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "stux_%s_%s", deviceId_, s.objectId);
+        snprintf(uid, sizeof(uid), "strux_%s_%s", deviceId_, s.objectId);
         json.field("uniq_id", uid);
 
         json.field("stat_t", stateTopic);
@@ -367,7 +445,7 @@ void MqttManager::PublishDiscovery()
         json.field("name", "Reboot");
 
         char uid[64];
-        snprintf(uid, sizeof(uid), "stux_%s_reboot", deviceId_);
+        snprintf(uid, sizeof(uid), "strux_%s_reboot", deviceId_);
         json.field("uniq_id", uid);
 
         json.field("cmd_t", cmdTopic);
@@ -382,6 +460,10 @@ void MqttManager::PublishDiscovery()
         esp_mqtt_client_publish(client_, configTopic, buf, 0, 1, 1);
     }
 
-    ESP_LOGI(TAG, "Home Assistant discovery published (%d sensors + reboot button)",
-             static_cast<int>(sizeof(sensors) / sizeof(sensors[0])));
+    // ── Registered discovery callbacks ───────────────────────
+
+    for (int i = 0; i < discoveryCallbackCount_; i++)
+        discoveryCallbacks_[i]();
+
+    ESP_LOGI(TAG, "Home Assistant discovery published");
 }

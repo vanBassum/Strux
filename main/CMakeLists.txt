@@ -13,6 +13,8 @@ set(SOURCE_FILES_LIST
     "Application/LogManager/LogManager.cpp"
     "Application/TimeManager/TimeManager.cpp"
     "Application/MqttManager/MqttManager.cpp"
+    "Application/DeviceManager/DeviceManager.cpp"
+    "Application/HomeAssistantManager/HomeAssistantManager.cpp"
     "lib/system/DateTime.cpp"
     "lib/system/TimeSpan.cpp"
 )
@@ -28,6 +30,8 @@ set(INCLUDE_DIRS_LIST
     "Application/LogManager"
     "Application/TimeManager"
     "Application/MqttManager"
+    "Application/DeviceManager"
+    "Application/HomeAssistantManager"
     "hardware"
     "lib"
     "lib/common"
