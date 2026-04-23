@@ -32,7 +32,10 @@ private:
     struct CommandEntry {
         const char* type;
         CommandFunc func;
+        bool requiresAuth;
     };
+
+    bool CheckAuth(const char* json, JsonWriter& resp);
 
     static const CommandEntry commands_[];
 

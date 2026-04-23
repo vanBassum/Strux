@@ -13,6 +13,7 @@ inline const SettingDef SETTINGS_DEFS[] = {
 
     // Device
     { "device.name",    SettingType::String, "Device Name",    "Strux" },
+    { "device.pin",     SettingType::String, "Device PIN",     "" },
 
     // MQTT
     { "mqtt.enabled",   SettingType::Bool,   "MQTT Enabled",   "0" },

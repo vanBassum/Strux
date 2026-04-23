@@ -9,8 +9,8 @@
 
 class JsonWriter;
 
-class LogManager {
-    static constexpr const char* TAG = "LogManager";
+class ConsoleManager {
+    static constexpr const char* TAG = "ConsoleManager";
     static constexpr int32_t QUEUE_DEPTH = 16;
 
 public:
@@ -18,10 +18,10 @@ public:
     static constexpr int32_t MAX_LINE_LEN = 200;
 
 public:
-    explicit LogManager(ServiceProvider& serviceProvider);
+    explicit ConsoleManager(ServiceProvider& serviceProvider);
 
-    LogManager(const LogManager&) = delete;
-    LogManager& operator=(const LogManager&) = delete;
+    ConsoleManager(const ConsoleManager&) = delete;
+    ConsoleManager& operator=(const ConsoleManager&) = delete;
 
     void Init();
 
@@ -34,8 +34,8 @@ private:
     ServiceProvider& serviceProvider_;
     InitState initState_;
 
-    // Ring buffer for log lines
-    char lines_[MAX_LINES][MAX_LINE_LEN] = {};
+    // Ring buffer for log lines (allocated in PSRAM during Init)
+    char (*lines_)[MAX_LINE_LEN] = nullptr;
     int32_t head_ = 0;
     int32_t count_ = 0;
     mutable Mutex mutex_;
@@ -55,5 +55,5 @@ private:
     void BroadcastTaskLoop();
 
     static int LogOutput(const char* fmt, va_list args);
-    static LogManager* s_instance_;
+    static ConsoleManager* s_instance_;
 };

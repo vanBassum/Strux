@@ -1,22 +1,24 @@
-#include "LogManager.h"
+#include "ConsoleManager.h"
 #include "JsonWriter.h"
 #include "BufferStream.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <cstdio>
 #include <cstring>
+#include <cassert>
 
-LogManager* LogManager::s_instance_ = nullptr;
+ConsoleManager* ConsoleManager::s_instance_ = nullptr;
 
 struct LogQueueItem {
-    char text[LogManager::MAX_LINE_LEN];
+    char text[ConsoleManager::MAX_LINE_LEN];
 };
 
-LogManager::LogManager(ServiceProvider& serviceProvider)
+ConsoleManager::ConsoleManager(ServiceProvider& serviceProvider)
     : serviceProvider_(serviceProvider)
 {
 }
 
-void LogManager::Init()
+void ConsoleManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
     if (!initAttempt)
@@ -26,9 +28,16 @@ void LogManager::Init()
 
     s_instance_ = this;
 
+    // Allocate log ring buffer in PSRAM (40KB)
+    lines_ = static_cast<char (*)[MAX_LINE_LEN]>(
+        heap_caps_calloc(MAX_LINES, MAX_LINE_LEN, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!lines_)
+        lines_ = static_cast<char (*)[MAX_LINE_LEN]>(calloc(MAX_LINES, MAX_LINE_LEN));
+    assert(lines_ && "Failed to allocate log buffer");
+
     queue_ = xQueueCreate(QUEUE_DEPTH, sizeof(LogQueueItem));
 
-    broadcastTask_.Init("LogBroadcast", 5, 4096);
+    broadcastTask_.Init("ConsoleBroadcast", 5, 4096);
     broadcastTask_.SetHandler([this]() { BroadcastTaskLoop(); });
     broadcastTask_.Run();
 
@@ -38,13 +47,13 @@ void LogManager::Init()
     ESP_LOGI(TAG, "Initialized (capturing stdout)");
 }
 
-void LogManager::SetBroadcastCallback(BroadcastFunc func, void* ctx)
+void ConsoleManager::SetBroadcastCallback(BroadcastFunc func, void* ctx)
 {
     broadcastFunc_ = func;
     broadcastCtx_ = ctx;
 }
 
-int LogManager::LogOutput(const char* fmt, va_list args)
+int ConsoleManager::LogOutput(const char* fmt, va_list args)
 {
     int ret = vprintf(fmt, args);
 
@@ -81,7 +90,7 @@ int LogManager::LogOutput(const char* fmt, va_list args)
     return ret;
 }
 
-void LogManager::FlushLine()
+void ConsoleManager::FlushLine()
 {
     if (lineLen_ == 0) return;
 
@@ -99,7 +108,7 @@ void LogManager::FlushLine()
     lineLen_ = 0;
 }
 
-void LogManager::StoreLine(const char* line, int32_t len)
+void ConsoleManager::StoreLine(const char* line, int32_t len)
 {
     LOCK(mutex_);
     if (len >= MAX_LINE_LEN) len = MAX_LINE_LEN - 1;
@@ -109,7 +118,7 @@ void LogManager::StoreLine(const char* line, int32_t len)
     if (count_ < MAX_LINES) count_++;
 }
 
-void LogManager::BroadcastTaskLoop()
+void ConsoleManager::BroadcastTaskLoop()
 {
     LogQueueItem item;
 
@@ -132,7 +141,7 @@ void LogManager::BroadcastTaskLoop()
     }
 }
 
-void LogManager::WriteHistory(JsonWriter& writer) const
+void ConsoleManager::WriteHistory(JsonWriter& writer) const
 {
     LOCK(mutex_);
 

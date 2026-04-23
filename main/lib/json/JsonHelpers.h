@@ -50,23 +50,93 @@ struct FixBuf {
 // JSON parsing helpers
 // ──────────────────────────────────────────────────────────────
 
+// Find the value position for a top-level JSON field by name.
+// Properly skips over string values so field names inside strings don't match.
+// Returns pointer to the first non-whitespace character after the colon, or nullptr.
+inline const char* FindJsonField(const char* json, const char* field)
+{
+    if (!json || !field) return nullptr;
+
+    size_t fieldLen = strlen(field);
+    const char* p = json;
+
+    while (*p)
+    {
+        // Skip whitespace and structural characters
+        while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || *p == ',' || *p == '{' || *p == '[')) p++;
+        if (!*p) break;
+
+        if (*p == '"')
+        {
+            // Read a quoted string — check if it's our field name
+            p++; // skip opening quote
+            const char* keyStart = p;
+            while (*p && *p != '"')
+            {
+                if (*p == '\\' && *(p + 1)) p++;
+                p++;
+            }
+            size_t keyLen = p - keyStart;
+            if (*p == '"') p++;
+
+            while (*p == ' ' || *p == '\t') p++;
+            if (*p == ':')
+            {
+                p++;
+                while (*p == ' ' || *p == '\t') p++;
+
+                if (keyLen == fieldLen && memcmp(keyStart, field, fieldLen) == 0)
+                    return p;
+
+                // Skip the value
+                if (*p == '"')
+                {
+                    p++;
+                    while (*p && *p != '"')
+                    {
+                        if (*p == '\\' && *(p + 1)) p++;
+                        p++;
+                    }
+                    if (*p == '"') p++;
+                }
+                else if (*p == '{' || *p == '[')
+                {
+                    char open = *p, close = (*p == '{') ? '}' : ']';
+                    int depth = 1;
+                    p++;
+                    while (*p && depth > 0)
+                    {
+                        if (*p == '"') { p++; while (*p && *p != '"') { if (*p == '\\' && *(p+1)) p++; p++; } if (*p) p++; continue; }
+                        if (*p == open) depth++;
+                        else if (*p == close) depth--;
+                        p++;
+                    }
+                }
+                else
+                {
+                    while (*p && *p != ',' && *p != '}' && *p != ']') p++;
+                }
+            }
+        }
+        else
+        {
+            p++;
+        }
+    }
+    return nullptr;
+}
+
 inline bool ExtractJsonString(const char* json, const char* field, char* out, size_t outSize)
 {
-    char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", field);
-    const char* pos = strstr(json, pattern);
-    if (!pos) return false;
-    pos = strchr(pos + strlen(pattern), ':');
-    if (!pos) return false;
-    pos++;
-    while (*pos == ' ' || *pos == '\t') pos++;
-    if (*pos != '"') return false;
-    pos++;
+    const char* val = FindJsonField(json, field);
+    if (!val || *val != '"') return false;
+
+    val++; // skip opening quote
     size_t i = 0;
-    while (*pos && *pos != '"' && i < outSize - 1)
+    while (*val && *val != '"' && i < outSize - 1)
     {
-        if (*pos == '\\' && *(pos + 1)) pos++;
-        out[i++] = *pos++;
+        if (*val == '\\' && *(val + 1)) val++;
+        out[i++] = *val++;
     }
     out[i] = '\0';
     return true;
@@ -74,14 +144,8 @@ inline bool ExtractJsonString(const char* json, const char* field, char* out, si
 
 inline int32_t ExtractJsonInt(const char* json, const char* field, int32_t defaultVal = 0)
 {
-    char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\"", field);
-    const char* pos = strstr(json, pattern);
-    if (!pos) return defaultVal;
-    pos = strchr(pos + strlen(pattern), ':');
-    if (!pos) return defaultVal;
-    pos++;
-    while (*pos == ' ' || *pos == '\t') pos++;
-    if (*pos == 'n') return defaultVal; // null
-    return static_cast<int32_t>(atoi(pos));
+    const char* val = FindJsonField(json, field);
+    if (!val) return defaultVal;
+    if (*val == 'n') return defaultVal; // null
+    return static_cast<int32_t>(atoi(val));
 }

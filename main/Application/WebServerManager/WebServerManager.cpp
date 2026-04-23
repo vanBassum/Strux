@@ -1,6 +1,6 @@
 #include "WebServerManager.h"
 #include "CommandManager.h"
-#include "LogManager.h"
+#include "ConsoleManager.h"
 #include "UpdateManager.h"
 
 #include <unistd.h>
@@ -34,8 +34,8 @@ void WebServerManager::Init()
     StartServer();
     RegisterRoutes();
 
-    // Wire log broadcast to WS clients
-    serviceProvider_.getLogManager().SetBroadcastCallback(
+    // Wire console broadcast to WS clients
+    serviceProvider_.getConsoleManager().SetBroadcastCallback(
         [](const char* json, int32_t len, void* ctx) {
             static_cast<WebServerManager*>(ctx)->Broadcast(json, len);
         },

@@ -51,6 +51,14 @@ esp_err_t StaticFileHandler::Handle(httpd_req_t* req)
         uri = uri_clean;
     }
 
+    // Reject path traversal attempts
+    if (strstr(uri, "..") != nullptr)
+    {
+        ESP_LOGW(TAG, "Rejected path traversal attempt: %s", uri);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid path");
+        return ESP_OK;
+    }
+
     if (strcmp(uri, "/") == 0)
     {
         uri = "/index.html";
