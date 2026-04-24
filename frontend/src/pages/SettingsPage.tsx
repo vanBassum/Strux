@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { backend, type SettingEntry, type WifiNetwork } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
-import { SaveIcon, RotateCcwIcon, PowerIcon, SearchIcon, LockIcon } from "lucide-react"
+import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -83,17 +83,28 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleReload}>
-            <RotateCcwIcon className="mr-1.5 size-3.5" />
-            Reload
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-            <SaveIcon className="mr-1.5 size-3.5" />
-            {saving ? "Saving..." : "Save"}
-          </Button>
+      <div className="sticky top-0 z-10 bg-background pb-2">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Settings</h1>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => { if (confirm("Reboot the device?")) backend.send("reboot").catch(() => {}) }}
+            >
+              <PowerIcon className="mr-1.5 size-3.5" />
+              Reboot
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleReload}>
+              <Undo2Icon className="mr-1.5 size-3.5" />
+              Undo
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+              <SaveIcon className="mr-1.5 size-3.5" />
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -126,26 +137,6 @@ export default function SettingsPage() {
         </p>
       )}
 
-      <div className="rounded-xl border border-red-500/20 bg-card p-6 text-card-foreground shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Reboot Device</h2>
-            <p className="text-sm text-muted-foreground">Restart the device. Unsaved settings will be lost.</p>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => {
-              if (confirm("Reboot the device?")) {
-                backend.send("reboot").catch(() => {})
-              }
-            }}
-          >
-            <PowerIcon className="mr-1.5 size-3.5" />
-            Reboot
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }
