@@ -1,6 +1,5 @@
 #include "NetworkManager.h"
 #include "SettingsManager.h"
-#include "SettingsDefs.h"
 #include "nvs_flash.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
@@ -48,7 +47,7 @@ void NetworkManager::Init()
     // Set hostname from device.name setting so it shows in the router
     auto& settings = serviceProvider_.getSettingsManager();
     char deviceName[33] = {};
-    settings.getString(Settings::Device::Name, deviceName, sizeof(deviceName));
+    settings.getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
         strncpy(deviceName, "Strux", sizeof(deviceName) - 1);
     wifi_interface_.SetHostname(deviceName);
@@ -82,8 +81,8 @@ void NetworkManager::Init()
     ESP_LOGI(TAG, "Initialized");
 
     // Load WiFi credentials from settings and try to connect
-    settings.getString(Settings::Wifi::Ssid, staSsid_, sizeof(staSsid_));
-    settings.getString(Settings::Wifi::Password, staPassword_, sizeof(staPassword_));
+    settings.getString("wifi.ssid", staSsid_, sizeof(staSsid_));
+    settings.getString("wifi.password", staPassword_, sizeof(staPassword_));
 
     if (staSsid_[0] != '\0')
     {

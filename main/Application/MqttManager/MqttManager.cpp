@@ -1,6 +1,5 @@
 #include "MqttManager.h"
 #include "SettingsManager/SettingsManager.h"
-#include "SettingsManager/SettingsDefs.h"
 #include "JsonWriter.h"
 #include "BufferStream.h"
 #include "esp_log.h"
@@ -33,7 +32,7 @@ void MqttManager::Init()
         return;
     }
 
-    enabled_ = serviceProvider_.getSettingsManager().getBool(Settings::Mqtt::Enabled, false);
+    enabled_ = serviceProvider_.getSettingsManager().getBool("mqtt.enabled", false);
 
     if (!enabled_)
     {
@@ -45,7 +44,7 @@ void MqttManager::Init()
     BuildDeviceId();
 
     char prefix[32] = {};
-    serviceProvider_.getSettingsManager().getString(Settings::Mqtt::Prefix, prefix, sizeof(prefix));
+    serviceProvider_.getSettingsManager().getString("mqtt.prefix", prefix, sizeof(prefix));
     if (prefix[0] == '\0')
         snprintf(prefix, sizeof(prefix), "strux");
     snprintf(baseTopic_, sizeof(baseTopic_), "%s/%s", prefix, deviceId_);
@@ -113,10 +112,10 @@ void MqttManager::StartClient()
     char broker[64] = {};
     char user[32] = {};
     char pass[64] = {};
-    settings.getString(Settings::Mqtt::Broker, broker, sizeof(broker));
-    settings.getString(Settings::Mqtt::User, user, sizeof(user));
-    settings.getString(Settings::Mqtt::Pass, pass, sizeof(pass));
-    int port = settings.getInt(Settings::Mqtt::Port, 1883);
+    settings.getString("mqtt.broker", broker, sizeof(broker));
+    settings.getString("mqtt.user", user, sizeof(user));
+    settings.getString("mqtt.pass", pass, sizeof(pass));
+    int port = settings.getInt("mqtt.port", 1883);
 
     if (broker[0] == '\0')
     {
@@ -327,7 +326,7 @@ void MqttManager::PublishEntityDiscovery(const char *component, const char *obje
     const esp_app_desc_t *app = esp_app_get_description();
 
     char deviceName[32] = {};
-    serviceProvider_.getSettingsManager().getString(Settings::Device::Name, deviceName, sizeof(deviceName));
+    serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
         snprintf(deviceName, sizeof(deviceName), "Strux");
 
@@ -360,7 +359,7 @@ void MqttManager::PublishDiscovery()
     const esp_app_desc_t *app = esp_app_get_description();
 
     char deviceName[32] = {};
-    serviceProvider_.getSettingsManager().getString(Settings::Device::Name, deviceName, sizeof(deviceName));
+    serviceProvider_.getSettingsManager().getString("device.name", deviceName, sizeof(deviceName));
     if (deviceName[0] == '\0')
         snprintf(deviceName, sizeof(deviceName), "Strux");
 

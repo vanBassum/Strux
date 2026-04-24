@@ -10,11 +10,11 @@ class JsonWriter;
 // Setting definition table
 // ──────────────────────────────────────────────────────────────
 
-// Opaque key type — construct only from predefined Settings:: constants.
+// Opaque key type — accepts string literals directly.
 // Implicit const char* conversion lets the NVS layer use it transparently.
 struct SettingKey {
     const char* key;
-    constexpr explicit SettingKey(const char* k) : key(k) {}
+    constexpr SettingKey(const char* k) : key(k) {}
     constexpr operator const char*() const { return key; }
 };
 

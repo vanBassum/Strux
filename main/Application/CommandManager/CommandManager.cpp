@@ -1,7 +1,6 @@
 #include "CommandManager.h"
 #include "ConsoleManager.h"
 #include "SettingsManager.h"
-#include "SettingsDefs.h"
 #include "UpdateManager.h"
 #include "JsonWriter.h"
 #include "JsonHelpers.h"
@@ -66,7 +65,7 @@ bool CommandManager::Execute(const char* type, const char* json, JsonWriter& res
 bool CommandManager::CheckAuth(const char* json, JsonWriter& resp)
 {
     char storedPin[64] = {};
-    serviceProvider_.getSettingsManager().getString(Settings::Device::Pin, storedPin, sizeof(storedPin));
+    serviceProvider_.getSettingsManager().getString("device.pin", storedPin, sizeof(storedPin));
 
     // No PIN configured — auth disabled
     if (storedPin[0] == '\0')
