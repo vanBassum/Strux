@@ -272,6 +272,7 @@ export interface DeviceInfo {
   chip: string
   heapFree: number
   heapMin: number
+  deviceTime: string
 }
 
 export interface UpdateStatus {

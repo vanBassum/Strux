@@ -4,6 +4,7 @@
 #include "UpdateManager.h"
 #include "JsonWriter.h"
 #include "JsonHelpers.h"
+#include "DateTime.h"
 #include "esp_log.h"
 #include "esp_app_desc.h"
 #include "esp_system.h"
@@ -104,6 +105,12 @@ void CommandManager::Cmd_Info(const char* json, JsonWriter& resp)
     resp.field("chip", CONFIG_IDF_TARGET);
     resp.field("heapFree", static_cast<uint32_t>(esp_get_free_heap_size()));
     resp.field("heapMin", static_cast<uint32_t>(esp_get_minimum_free_heap_size()));
+
+    char deviceTimeStr[32] = "Not synced";
+    DateTime now = DateTime::Now();
+    if (now.YearLocal() >= 2020)
+        now.ToStringLocal(deviceTimeStr, sizeof(deviceTimeStr), "%F %T");
+    resp.field("deviceTime", deviceTimeStr);
 }
 
 void CommandManager::Cmd_UpdateStatus(const char* json, JsonWriter& resp)

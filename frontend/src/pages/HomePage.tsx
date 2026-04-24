@@ -37,6 +37,7 @@ export default function HomePage() {
             <Row label="Chip" value={info.chip} />
             <Row label="Free heap" value={formatBytes(info.heapFree)} />
             <Row label="Min free heap" value={formatBytes(info.heapMin)} />
+            <Row label="Device time" value={info.deviceTime} />
           </div>
         )}
       </div>
