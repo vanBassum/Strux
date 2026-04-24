@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 // Group settings by prefix (e.g. "wifi.ssid" → "wifi", "mqtt.broker" → "mqtt")
-function groupSettings(settings: SettingEntry[]): { label: string; items: SettingEntry[] }[] {
+function groupSettings(settings: SettingEntry[]): { label: string; prefix: string; items: SettingEntry[] }[] {
   const groups = new Map<string, SettingEntry[]>()
   for (const s of settings) {
     const dot = s.key.indexOf(".")
@@ -23,9 +23,45 @@ function groupSettings(settings: SettingEntry[]): { label: string; items: Settin
   }
 
   return [...groups.entries()].map(([prefix, items]) => ({
+    prefix,
     label: labels[prefix] ?? prefix.charAt(0).toUpperCase() + prefix.slice(1),
     items,
   }))
+}
+
+// ── Table of contents ────────────────────────────────────────
+
+function SettingsToc({
+  groups,
+  activePrefix,
+}: {
+  groups: { label: string; prefix: string }[]
+  activePrefix: string | null
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        On this page
+      </p>
+      {groups.map((g) => (
+        <a
+          key={g.prefix}
+          href={`#settings-${g.prefix}`}
+          onClick={(e) => {
+            e.preventDefault()
+            document.getElementById(`settings-${g.prefix}`)?.scrollIntoView({ behavior: "smooth" })
+          }}
+          className={`block rounded-md px-3 py-1.5 text-sm transition-colors hover:text-foreground ${
+            activePrefix === g.prefix
+              ? "bg-muted font-medium text-foreground"
+              : "text-muted-foreground"
+          }`}
+        >
+          {g.label}
+        </a>
+      ))}
+    </div>
+  )
 }
 
 export default function SettingsPage() {
@@ -33,6 +69,7 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingEntry[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [activePrefix, setActivePrefix] = useState<string | null>(null)
 
   useEffect(() => {
     if (connection !== "connected") return
@@ -41,6 +78,23 @@ export default function SettingsPage() {
       setDirty(false)
     }).catch(() => {})
   }, [connection])
+
+  useEffect(() => {
+    if (settings.length === 0) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const prefix = (entry.target as HTMLElement).dataset.prefix
+            if (prefix) setActivePrefix(prefix)
+          }
+        }
+      },
+      { rootMargin: "-20% 0px -70% 0px" },
+    )
+    document.querySelectorAll<HTMLElement>("[data-prefix]").forEach((el) => observer.observe(el))
+    return () => observer.disconnect()
+  }, [settings])
 
   async function handleChange(key: string, value: string) {
     try {
@@ -82,7 +136,8 @@ export default function SettingsPage() {
   const groups = groupSettings(settings)
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-5xl">
+      {/* Sticky header — spans full width */}
       <div className="sticky top-0 z-10 bg-background pb-2">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">Settings</h1>
@@ -108,35 +163,53 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {settings.length === 0 ? (
-        <div className="rounded-xl border bg-card text-card-foreground shadow-sm">
-          <p className="p-6 text-sm text-muted-foreground">Loading...</p>
-        </div>
-      ) : (
-        groups.map((group) => (
-          <div key={group.label} className="rounded-xl border bg-card text-card-foreground shadow-sm">
-            <div className="border-b p-4">
-              <h2 className="text-lg font-semibold">{group.label}</h2>
+      <div className="flex gap-12">
+        {/* Main settings content */}
+        <div className="min-w-0 flex-1 space-y-6 py-6">
+          {settings.length === 0 ? (
+            <div className="rounded-xl border bg-card text-card-foreground shadow-sm">
+              <p className="p-6 text-sm text-muted-foreground">Loading...</p>
             </div>
-            <ul className="divide-y">
-              {group.items.map((setting) => (
-                <SettingRow
-                  key={setting.key}
-                  setting={setting}
-                  onChange={(value) => handleChange(setting.key, value)}
-                />
-              ))}
-            </ul>
-          </div>
-        ))
-      )}
+          ) : (
+            groups.map((group) => (
+              <div
+                key={group.prefix}
+                id={`settings-${group.prefix}`}
+                data-prefix={group.prefix}
+                className="rounded-xl border bg-card text-card-foreground shadow-sm"
+              >
+                <div className="border-b p-4">
+                  <h2 className="text-lg font-semibold">{group.label}</h2>
+                </div>
+                <ul className="divide-y">
+                  {group.items.map((setting) => (
+                    <SettingRow
+                      key={setting.key}
+                      setting={setting}
+                      onChange={(value) => handleChange(setting.key, value)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
+          )}
 
-      {dirty && (
-        <p className="text-sm text-amber-500">
-          You have unsaved changes. Press Save to write them to flash.
-        </p>
-      )}
+          {dirty && (
+            <p className="text-sm text-amber-500">
+              You have unsaved changes. Press Save to write them to flash.
+            </p>
+          )}
+        </div>
 
+        {/* ToC — only visible on wide screens */}
+        {groups.length > 0 && (
+          <aside className="hidden w-48 shrink-0 xl:block">
+            <div className="sticky top-14 pt-6">
+              <SettingsToc groups={groups} activePrefix={activePrefix} />
+            </div>
+          </aside>
+        )}
+      </div>
     </div>
   )
 }
