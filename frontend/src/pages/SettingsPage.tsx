@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { backend, type SettingEntry, type WifiNetwork } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
-import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon } from "lucide-react"
+import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon, DownloadIcon, UploadIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -134,6 +134,32 @@ export default function SettingsPage() {
     }
   }
 
+  function handleExport() {
+    const obj: Record<string, unknown> = {}
+    for (const s of settings) obj[s.key] = s.value
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "strux-settings.json"
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ""
+    try {
+      const obj = JSON.parse(await file.text()) as Record<string, unknown>
+      for (const [key, value] of Object.entries(obj)) {
+        await handleChange(key, String(value))
+      }
+    } catch {
+      // ignore malformed file
+    }
+  }
+
   const groups = groupSettings(settings)
   const filteredGroups = search.trim()
     ? groups
@@ -229,6 +255,23 @@ export default function SettingsPage() {
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={handleExport}>
+                  <DownloadIcon className="mr-1.5 size-3.5" />
+                  Export
+                </Button>
+                <label className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full" asChild>
+                    <span>
+                      <UploadIcon className="mr-1.5 size-3.5" />
+                      Import
+                    </span>
+                  </Button>
+                  <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+                </label>
+              </div>
+
               <SettingsToc groups={filteredGroups} activePrefix={activePrefix} />
             </div>
           </aside>
