@@ -10,9 +10,14 @@
 # ──────────────────────────────────────────────────────────────
 
 # The USB-C port is the chip's own USB Serial/JTAG peripheral, not a UART
-# bridge: without this the console goes out of GPIO21 and `idf.py monitor`
-# shows nothing.
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# bridge, so console output has to reach it or `idf.py monitor` shows nothing.
+#
+# EXPERIMENT (diag/packet-loss): it reaches it as the SECONDARY console, not the
+# primary. The primary console is a full VFS driver whose write blocks waiting for
+# FIFO space; the secondary is a best-effort ROM path that drops instead of
+# waiting. Making USB the primary is what stalls whichever task logged.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 
 # Flash is 4 MB (as in the root defaults) but wired for DIO on these boards,
 # and the C3's SPI flash tops out at 80 MHz — same speed, safer mode.
