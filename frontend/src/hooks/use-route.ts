@@ -1,12 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import type { Page } from "@/components/AppSidebar"
-
-const validPages: Page[] = [
-  "home",
-  "console",
-  "settings",
-  "firmware",
-]
+import { hashToRoute, routeToHash, sameRoute, type Route } from "@/shell/registry"
 
 // The route lives in the HASH, not the path, and that is load-bearing rather
 // than a style choice: this UI is served from two mount points the build cannot
@@ -20,34 +13,29 @@ const validPages: Page[] = [
 // document-directory trick keep resolving, at any nesting depth, with no
 // server-side SPA fallback involved. The prefix is never parsed here — the same
 // reason backend.ts knows nothing about a device id.
-function hashToPage(hash: string): Page {
-  const segment = hash.replace(/^#\/?/, "").split("/")[0]?.toLowerCase()
-  if (segment && validPages.includes(segment as Page)) return segment as Page
-  return "home"
-}
-
-function pageToHash(page: Page): string {
-  return page === "home" ? "#/" : `#/${page}`
-}
+//
+// The shape of a route — which pages exist, and that a module page is one of them —
+// belongs to `shell/registry`, not here. This hook only owns the window: read the
+// hash, write the hash, listen for changes.
 
 export function useRoute() {
-  const [page, setPageState] = useState<Page>(() =>
-    hashToPage(window.location.hash),
+  const [route, setRouteState] = useState<Route>(() =>
+    hashToRoute(window.location.hash),
   )
 
-  const navigate = useCallback((p: Page) => {
+  const navigate = useCallback((next: Route) => {
     // Assigning the hash pushes its own history entry, so back/forward keep
     // working without touching history directly.
-    const hash = pageToHash(p)
+    const hash = routeToHash(next)
     if (window.location.hash !== hash) window.location.hash = hash
-    setPageState(p)
+    setRouteState((prev) => (sameRoute(prev, next) ? prev : next))
   }, [])
 
   useEffect(() => {
-    const onHashChange = () => setPageState(hashToPage(window.location.hash))
+    const onHashChange = () => setRouteState(hashToRoute(window.location.hash))
     window.addEventListener("hashchange", onHashChange)
     return () => window.removeEventListener("hashchange", onHashChange)
   }, [])
 
-  return { page, navigate }
+  return { route, navigate }
 }

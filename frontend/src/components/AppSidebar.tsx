@@ -1,5 +1,4 @@
 import { useEffect } from "react"
-import { HomeIcon, TerminalIcon, SettingsIcon, DownloadIcon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -16,19 +15,14 @@ import { useDeviceInfo } from "@/hooks/use-device-info"
 import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
+import { shellPages, sameRoute, type Route } from "@/shell/registry"
 
-const navItems = [
-  { title: "Home", icon: HomeIcon, page: "home" as const },
-  { title: "Console", icon: TerminalIcon, page: "console" as const },
-  { title: "Settings", icon: SettingsIcon, page: "settings" as const },
-  { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },
-]
-
-export type Page = (typeof navItems)[number]["page"]
-
+// The sidebar renders navigation; it no longer *defines* it. `shellPages` and the
+// `Route` type moved to shell/registry so that firmware-contributed pages can join
+// the same list without a component owning the router's type.
 interface AppSidebarProps {
-  currentPage: Page
-  onNavigate: (page: Page) => void
+  currentRoute: Route
+  onNavigate: (route: Route) => void
 }
 
 const statusColor = {
@@ -43,7 +37,7 @@ const statusLabel = {
   disconnected: "Offline",
 } as const
 
-export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
+export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
   const connection = useConnectionStatus()
   const info = useDeviceInfo()
   const release = useLatestRelease()
@@ -66,11 +60,11 @@ export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
+              {shellPages.map((item) => (
                 <SidebarMenuItem key={item.page}>
                   <SidebarMenuButton
-                    isActive={currentPage === item.page}
-                    onClick={() => onNavigate(item.page)}
+                    isActive={sameRoute(currentRoute, { kind: "shell", page: item.page })}
+                    onClick={() => onNavigate({ kind: "shell", page: item.page })}
                   >
                     <item.icon />
                     <span>{item.title}</span>

@@ -15,6 +15,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@shell": path.resolve(__dirname, "./shell-contract"),
     },
   },
   build: {

@@ -25,8 +25,9 @@
     "noUncheckedSideEffectImports": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shell/*": ["./shell-contract/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "shell-contract"]
 }
