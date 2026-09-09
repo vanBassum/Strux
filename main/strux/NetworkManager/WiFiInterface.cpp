@@ -1,3 +1,4 @@
+#include "DiagConfig.h"
 #include "WiFiInterface.h"
 #include "SessionStats.h"
 
@@ -18,8 +19,10 @@ void WiFiInterface::Init()
     staNetif_ = esp_netif_create_default_wifi_sta();
     assert(staNetif_ != nullptr);
 
+#if DIAG_CREATE_AP_NETIF
     apNetif_ = esp_netif_create_default_wifi_ap();
     assert(apNetif_ != nullptr);
+#endif
 
     // Default to STA netif for base class operations
     InitBase(staNetif_);
@@ -43,7 +46,7 @@ void WiFiInterface::Init()
 void WiFiInterface::SetHostname(const char* hostname)
 {
     esp_netif_set_hostname(staNetif_, hostname);
-    esp_netif_set_hostname(apNetif_, hostname);
+    if (apNetif_) esp_netif_set_hostname(apNetif_, hostname);
 }
 
 void WiFiInterface::ConnectSta(const char* ssid, const char* password)
@@ -84,8 +87,10 @@ void WiFiInterface::ApplyStaConfig(const char* ssid, const char* password)
     // exotic one — and the first of those heard is not necessarily one that will
     // complete an association. The cost is a second or so of scan per attempt, which
     // is inside the attempt timeout and cheap against a round that fails.
+#if DIAG_ALL_CHANNEL_SCAN
     config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     config.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+#endif
 
     // Advertise PMF support. `config = {}` zeroes pmf_cfg, and a station that claims
     // no Protected Management Frames is refused outright by a WPA3 access point and
@@ -95,7 +100,9 @@ void WiFiInterface::ApplyStaConfig(const char* ssid, const char* password)
     //
     // capable, not required: an AP that does not offer PMF must still be joinable,
     // and plenty of WPA2-only hardware does not.
+#if DIAG_PMF_CAPABLE
     config.sta.pmf_cfg.capable = true;
+#endif
     config.sta.pmf_cfg.required = false;
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &config));

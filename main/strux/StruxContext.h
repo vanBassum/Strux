@@ -1,4 +1,5 @@
 #pragma once
+#include "DiagConfig.h"
 #include "StruxProvider.h"
 #include "CommandManager/CommandManager.h"
 #include "ConsoleManager/ConsoleManager.h"
@@ -30,19 +31,39 @@ public:
     /// application registers into these managers, so they must exist and be ready first.
     void Init()
     {
+#if DIAG_ENABLE_CONSOLE
         consoleManager_.Init();
+#endif
+#if DIAG_ENABLE_SETTINGS
         settingsManager_.Init();
+#endif
+#if DIAG_ENABLE_SYSTEM
         systemManager_.Init();
+#endif
+#if DIAG_ENABLE_NETWORK
         networkManager_.Init();
+#endif
+#if DIAG_ENABLE_TIME
         timeManager_.Init();
+#endif
+#if DIAG_ENABLE_COMMAND
         commandManager_.Init();
+#endif
+#if DIAG_ENABLE_UI
         uiManager_.Init();
+#endif
+#if DIAG_ENABLE_UPDATE
         updateManager_.Init();
+#endif
+#if DIAG_ENABLE_WEBSERVER
         webServerManager_.Init();
-        // After WebServer: shares its Authenticator, and its log fan-out target.
+#endif
+#if DIAG_ENABLE_RELAY
         relayManager_.Init();
-        // After Relay: telemetry leaves the device down the relay pipe.
+#endif
+#if DIAG_ENABLE_TELEMETRY
         telemetryManager_.Init();
+#endif
     }
 
     CommandManager& getCommandManager() override { return commandManager_; }

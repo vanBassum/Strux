@@ -1,3 +1,4 @@
+#include "DiagConfig.h"
 #include "NetworkManager.h"
 #include "SettingsManager.h"
 #include "SystemManager.h"
@@ -63,7 +64,7 @@ void NetworkManager::Init()
     ComposeApSsid();
 
     // mDNS — <deviceName>.local
-    if (mdnsEnabled_.Get())
+    if (DIAG_ENABLE_MDNS && mdnsEnabled_.Get())
     {
         ESP_ERROR_CHECK(mdns_init());
         mdns_hostname_set(deviceName);

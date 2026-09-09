@@ -4,6 +4,9 @@
 #include "BoardContext.h"
 #include "StruxContext.h"
 #include "AppContext.h"
+#include "DiagConfig.h"
+
+extern "C" void diag_udpecho_start(void);
 
 static const char* TAG = "main";
 
@@ -31,7 +34,11 @@ extern "C" void app_main(void)
 
     board.Init();         // hardware first: it depends on nothing
     strux.Init();         // then the framework the application registers into
+#if DIAG_ENABLE_APP
     application.Init();   // then the product
+#endif
+
+    diag_udpecho_start();
 
     // Mark firmware as valid so the bootloader doesn't roll back on next reboot
     esp_ota_mark_app_valid_cancel_rollback();
