@@ -5,13 +5,16 @@ lands or is dropped — never ticked off in place. Everything else lives in
 `docs/backlog/` (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
-Last updated 2026-09-08.
+Last updated 2026-09-09.
 
 ## Now
 
-**The relay is its own repository** — [`vanBassum/strux-relay`](https://github.com/vanBassum/strux-relay),
-extracted 2026-09-08 with the history of everything it was here. Next in that repo is its
-own UI in React and shadcn at behaviour parity, which is step 1 of the module plan.
+**Device-hosted UI modules, steps 1-4 done** on `ui-modules`: the auth fix, `UiManager`
+and `ui modules`, the shell contract and seam, and `ModuleHost` with the LED shipping as
+the first real module. The device frontend now learns its feature UI from the firmware —
+there is no string "led" left in `frontend/src`. Steps 5 and 6 are the relay's half:
+`DeviceCommand` on the hub, the cache warmer asking `ui modules` instead of scraping, and
+the relay shell consuming the same bundles.
 → [`backlog/2026-09-08-device-hosted-ui-modules.md`](backlog/2026-09-08-device-hosted-ui-modules.md)
 
 **Putting the relay in production** — live at `https://strux.vanbassum.com`, behind
