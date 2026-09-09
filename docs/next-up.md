@@ -16,24 +16,17 @@ same bundle over different transports; a home screen is contributed cards and no
 else. Proven on the bench with two boards, one of them older firmware that ships no
 modules at all.
 
-**What is left, and it is not small.** The relay shell gives a device an Overview and
-nothing else — **no Console, Settings or Firmware page**, which the device's own shell
-has had all along. Those are *not* modules and must not become modules: they are
-framework features every Strux device has, and `settings list` already describes itself,
-so they belong in the shell (see the rule in CLAUDE.md — a declaration stays a
-declaration). Three pages, three different costs:
+**The relay shell now gives a device Console, Settings and Firmware too**, beside the
+Overview that renders its contributed cards. Not modules, deliberately: they are
+framework features every Strux device has and each already describes itself, so the
+pages are generated from declarations. The Firmware upload needed the one thing a
+command cannot express — writing an image is a session, not one envelope and one reply
+— so the relay grew a streaming path and an HTTP POST route to feed it.
 
-- **Settings** — `settings list` / `set` / `save`, all single round trips. Nothing new needed.
-- **Console** — `log list` works now, polled. A live tail does not: session 0 broadcasts
-  fan out to *browser-pipe* clients, not to hub clients, so it needs a per-device hub
-  group in `DeviceConnection`.
-- **Firmware** — the real work. `CommandAsync` sends one envelope and reads one reply;
-  an upload is a *streamed* session (envelope chunk, then many body chunks), so the relay
-  needs a streaming sibling to it.
-
-Until then a device's own page is one click away via *Open device UI*, so nothing is
-unreachable. **Neither branch is merged**, and the relay's CI only builds `main` and
-tags — so nothing of this is on `strux.vanbassum.com` yet.
+Two known gaps, both named in the relay's README: the Console is **polled**, because
+session-0 broadcasts fan out to browser pipes rather than hub clients and a live tail
+needs a per-device hub group; and the device's own flash position is not surfaced
+during an upload, only the browser's upload progress.
 
 **Putting the relay in production** — live at `https://strux.vanbassum.com`, behind
 Traefik and Authentik. A device must be approved and must present its own token, or the
