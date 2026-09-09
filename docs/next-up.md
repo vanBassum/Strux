@@ -16,17 +16,20 @@ same bundle over different transports; a home screen is contributed cards and no
 else. Proven on the bench with two boards, one of them older firmware that ships no
 modules at all.
 
-**The relay shell now gives a device Console, Settings and Firmware too**, beside the
-Overview that renders its contributed cards. Not modules, deliberately: they are
-framework features every Strux device has and each already describes itself, so the
-pages are generated from declarations. The Firmware upload needed the one thing a
-command cannot express — writing an image is a session, not one envelope and one reply
-— so the relay grew a streaming path and an HTTP POST route to feed it.
+**Everything a device shows is now a module.** Neither shell contributes anything to a
+device's navigation: Console, Settings and Firmware are framework modules registered by
+the managers that own their commands, the LED is the app's, and the first page the
+manifest declares is the landing page. Both shells can be read end to end without
+finding the name of a device command. The contract is at `hostApi` 2 — it grew `upload`,
+`download` and `logs`, because three of the four pages needed something `request`
+cannot say.
+→ [`reasoning/…a-shell-that-owns-no-page…`](reasoning/2026-09-09-23h10-a-shell-that-owns-no-page-is-the-only-shell-that-knows-no-commands.md)
 
-Two known gaps, both named in the relay's README: the Console is **polled**, because
-session-0 broadcasts fan out to browser pipes rather than hub clients and a live tail
-needs a per-device hub group; and the device's own flash position is not surfaced
-during an upload, only the browser's upload progress.
+**Known gaps**, both small and both written down where they can be acted on: an upload
+does not surface the device's own flash position (only the browser's upload progress),
+and the framework modules appear in the nav as Firmware, Settings, Console because
+`UiManager` head-inserts and they register in `Init()` order. The LED being first is
+what matters and is correct.
 
 **Putting the relay in production** — live at `https://strux.vanbassum.com`, behind
 Traefik and Authentik. A device must be approved and must present its own token, or the

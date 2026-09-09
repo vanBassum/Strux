@@ -130,35 +130,42 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 
 ### Device-hosted UI modules
 
-Neither shell knows any device's features at build time. The **firmware** declares its
-UI and ships the bundle that draws it, so a module can never disagree with the firmware
-it talks to — module and firmware come out of the same `www` build.
+**Neither shell contributes anything to a device's navigation.** Every page comes from
+the firmware's manifest, and the first page it declares is the landing page — so a
+device decides both what its UI is and which part of it is the front screen. A shell is
+the frame, the router, the transport and the theme. Nothing else.
+
+That is not where this started. Console, Settings and Firmware were pages compiled into
+each shell, which meant two implementations of each and, worse, a shell that knew
+`settings list` and `partition status` by name. Both shells now know the name of no
+device command at all.
 
 - **The manifest is a command, not a file.** `ui modules` ([UiManager](main/strux/UiManager/))
-  answers with `hostApi` plus the modules, their pages and their cards. Nothing about a
-  module travels over HTTP except the bundle itself, and device HTTP still serves only
-  static files to a LAN browser.
-- **The app registers its UI** the same way it registers commands and settings: a
-  `UiModule` handed to `UiManager::Register()` from the manager's own `Init()`.
-  `LedManager`'s `uiCards_` holds the ids, and they must match what the bundle
-  registers — a registration the manifest does not declare is ignored with a warning,
-  because honouring it would make navigation depend on running module code.
-- **Cards first; a page only when a card cannot hold it.** A shell's home screen *is*
-  the product: it renders contributed cards and nothing of its own. So a feature that
-  is what the device is for declares a **card**, not a page — a sidebar entry beside
-  Home leading to the same controls is a second door into one room. `UiPage` is still
-  there, for a module with genuinely more to show. The LED demo declares one card and
-  no page, and the relay shell does the same thing under a device's *Overview*.
-  Consequence worth knowing: a device that contributes nothing has an empty home
-  screen, which is the template's honest default rather than a bug.
-- **The shell's own readout is not on the home screen.** Chip, heap, IP and compile
-  time live in a dialog behind the sidebar footer
-  ([DeviceInfoDialog](frontend/src/components/DeviceInfoDialog.tsx)) — read once when
-  something is wrong, never while using the device, so leading with them pushed the
-  actual feature below the fold on every product built from this template.
+  answers with `hostApi` plus the modules and their pages. Nothing about a module
+  travels over HTTP except the bundle itself, and device HTTP still serves only static
+  files to a LAN browser.
+- **The manager that owns the commands owns the page.** A `UiModule` handed to
+  `UiManager::Register()` from the manager's own `Init()`, exactly like a command table
+  or a setting: [ConsoleManager](main/strux/ConsoleManager/) declares `console`,
+  [SettingsManager](main/strux/SettingsManager/) `settings`,
+  [UpdateManager](main/strux/UpdateManager/) `firmware`, and the app's own
+  [LedManager](main/app/LedManager/) declares `led`. `UiManager::Register` only takes a
+  mutex and links a chain, so it may be called before `UiManager::Init()` — which the
+  framework managers do, since they initialise first.
+- **Declaration order is the landing page.** `UiManager` head-inserts, and the app's
+  managers initialise after the framework's, so a product's own page ends up first and
+  is what a shell opens. A device with no modules has no page, says so, and leaves
+  nothing else broken.
+- **Pages only.** There were briefly cards too, rendered into a shell-owned home
+  screen; they went when the shell stopped owning any page under a device, because
+  nothing was left to host them.
 - **The contract is one file with no imports** ([frontend/shell-contract/contract.ts](frontend/shell-contract/contract.ts)),
-  because it gets vendored into the relay. It describes nothing below `request`: a
-  module never opens a socket and never imports the shell's backend singleton.
+  because it gets vendored into the relay. `HOST_API` is **2**. Beyond `request` it
+  offers `upload` (a command whose request has a body — a firmware image is not an
+  argument), `download` (the same in reverse), and `logs` (the device's session-0
+  broadcast, the one device-initiated stream there is). There is still no
+  `subscribe(topic)`: `logs` is named after the one thing it carries so it does not
+  become a framework with a single user.
 - **One React, via an import map.** A module builds `react` and `react/jsx-runtime` as
   external; the shell publishes them at `assets/host-react.js` and
   `assets/host-jsx-runtime.js` (see [frontend/src/shell/host-react.js](frontend/src/shell/host-react.js))
@@ -167,32 +174,34 @@ it talks to — module and firmware come out of the same `www` build.
   `scripts/check-modules.mjs`, which fails the build if a module imports a bare
   specifier the map does not declare or a name the facade does not export. That check
   exists because the first version of the facade used `export * from "react"`, which
-  compiles, emits, ships, and silently exports nothing usable: React is CommonJS.
-- **A module bundles its own CSS and its own primitives.** Its stylesheet is imported
-  as a string and adopted as a `<style>` on `activate()`, because Vite injects no
-  `<link>` for a chunk pulled in by `import()` — the styles would simply never apply.
-  It imports Tailwind's theme and utilities but **not preflight** (a second reset would
-  restyle the shell) and scopes `@source` to itself (otherwise Tailwind emits the
-  shell's utilities into it too — measured at 61 KB against 14 KB). It styles against
-  the shell's CSS variables, not a shared Tailwind config.
-- **Adding a module:** a folder under `frontend/modules/<id>/` with its own
-  `vite.config.ts` writing `www/modules/<id>.js` (stable name — the firmware names it),
-  a line in `frontend/package.json`'s `build:modules`, and a `UiModule` registration in
-  the manager that owns the feature. [frontend/modules/led/](frontend/modules/led/) is
-  the worked example.
+  compiles, emits, ships, and silently exports nothing usable: React is CommonJS. In
+  dev the map's targets do not exist — they are build artefacts — so `vite.config.ts`
+  redirects them to source; without it the seam worked only in a build.
+- **A module ships its own primitives** ([frontend/modules/_ui/](frontend/modules/_ui/)).
+  It cannot use either shell's components: this shell is radix-ui and the relay's is
+  `@base-ui/react`, so importing either would run on exactly one of them. `_ui` is
+  plain elements over the shells' design tokens, compiled into each bundle.
+- **A module bundles its own CSS.** Imported as a string and adopted as a `<style>` on
+  `activate()`, because Vite injects no `<link>` for a chunk pulled in by `import()` —
+  the styles would simply never apply. It imports Tailwind's theme and utilities but
+  **not preflight** (a second reset would restyle the shell) and scopes `@source` to
+  itself and `_ui`.
+- **Adding a module:** a folder under `frontend/modules/<id>/` whose `vite.config.ts`
+  is one call to `moduleConfig(import.meta.dirname, "<id>")`, a line in
+  `frontend/package.json`'s `build:modules` and `typecheck`, and a `UiModule`
+  registration in the manager that owns the feature.
 - **Mixed fleets are the normal case.** Firmware without `ui modules` refuses the
   command, and a refusal means "no modules" rather than an error; a `hostApi` outside
-  the shell's range omits navigation and says so, leaving Settings, Console and Firmware
-  fully usable.
+  the shell's range says so and leaves the rest working.
 - **The relay composes the same bundles**
   ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)). It reads the
-  manifest with a hub call of its own rather than a generic command, because only the
-  relay can tell a device that *refused* `ui modules` from one that went silent — the
-  first is the mixed-fleet case, the second is a fault. A module's `request` becomes
-  `DeviceCommand` on the hub, over the pipe the device already dialled; the contract is
-  vendored there byte-identical with a lock file, and its build fails if the copy drifts.
-  Its module registry is **per device**, because two boards can declare the same page id
-  drawn by different bundles.
+  manifest with a hub method of its own rather than a generic command call, because
+  only the relay can tell a device that *refused* `ui modules` from one that went
+  silent — the first is the mixed-fleet case, the second is a fault. `request` becomes
+  a hub call; `upload` and `download` become HTTP routes, because a body is a body. The
+  contract is vendored there byte-identical with a lock file, and its build fails if
+  the copy drifts. Its module registry is **per device**, because two boards can
+  declare the same page id drawn by different bundles.
 
 ### Deliberately out of scope
 
