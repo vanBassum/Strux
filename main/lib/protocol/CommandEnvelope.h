@@ -108,14 +108,12 @@ namespace protocol
 
         if (category[0] == '\0' || command[0] == '\0')
         {
-            SSTAT(session.stats(), routeBad);
             session.reject("expected: <category> <command>");
             return;
         }
 
         if (!gate.Allows(category))
         {
-            SSTAT(session.stats(), authReject);
             session.reject("unauthorized");
             return;
         }
@@ -123,13 +121,10 @@ namespace protocol
         // in == out: the handler reads its arguments and any body from the same
         // session it writes its reply to.
         const char* failedArg = nullptr;
-        SSTAT(session.stats(), dispatchIn);
         const RequestError err =
             dispatcher.Execute(category, command, session, session, &gate, &failedArg);
-        SSTAT(session.stats(), dispatchOut);
         if (err != RequestError::Ok)
         {
-            SSTAT(session.stats(), dispatchErr);
             // Form failures refuse the request. REJECT ends the session like FINAL
             // does, so this composes with anything the handler already wrote — a
             // refusal can always be last.

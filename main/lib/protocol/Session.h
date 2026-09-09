@@ -3,7 +3,6 @@
 #include "Stream.h"
 #include "SessionLink.h"
 #include "SessionProtocol.h"
-#include "SessionStats.h"
 #include "esp_log.h"
 #include <cstdint>
 #include <cstddef>
@@ -47,29 +46,13 @@ class Session : public Stream
     uint8_t* buf_;        // external [ header | payload ] buffer (reply)
     size_t   cap_;        // payload capacity (buf_ size minus HEADER_LEN)
     size_t   outLen_ = 0; // payload bytes buffered so far
-    size_t   totalOut_ = 0; // payload bytes written across the whole reply (diagnostic)
     bool     failed_ = false;
-
-    session_stats::Counters* stats_ = nullptr;   // TEMPORARY DIAGNOSTIC
 
     // Frame [id|flags|payload] into buf_ and send it; reset the payload cursor.
     void emitChunk(uint8_t flags)
     {
         session::writeHeader(buf_, id_, flags);
-        const bool final = (flags & (session::FLAG_FINAL | session::FLAG_REJECT)) != 0;
-        if (final && totalOut_ == 0 && outLen_ == 0) SSTAT(stats_, replyEmpty);
-        totalOut_ += outLen_;
-        if (link_.SendRaw(buf_, session::HEADER_LEN + outLen_))
-        {
-            SSTAT(stats_, sendOk);
-            if (final) SSTAT(stats_, finalOk);
-        }
-        else
-        {
-            failed_ = true;
-            SSTAT(stats_, sendFail);
-            if (final) SSTAT(stats_, finalFail);
-        }
+        if (!link_.SendRaw(buf_, session::HEADER_LEN + outLen_)) failed_ = true;
         outLen_ = 0;
     }
 
@@ -93,7 +76,6 @@ class Session : public Stream
                          static_cast<unsigned>(consumed_), n,
                          static_cast<unsigned>(sid), static_cast<unsigned>(id_));
                 failed_ = true;
-                SSTAT(stats_, readFail);
                 return false;
             }
             req_ = inBuf_ + session::HEADER_LEN;
@@ -106,14 +88,8 @@ class Session : public Stream
 
 public:
     Session(uint16_t id, SessionLink& link, uint8_t* buf, size_t payloadCap,
-            uint8_t* inBuf, size_t inCap,
-            session_stats::Counters* stats = nullptr)
-        : id_(id), link_(link), inBuf_(inBuf), inCap_(inCap), buf_(buf), cap_(payloadCap),
-          stats_(stats) {}
-
-    /// TEMPORARY DIAGNOSTIC: the interface's counter block, so the protocol layer
-    /// above can attribute dispatch stages to the transport that opened the session.
-    session_stats::Counters* stats() const { return stats_; }
+            uint8_t* inBuf, size_t inCap)
+        : id_(id), link_(link), inBuf_(inBuf), inCap_(inCap), buf_(buf), cap_(payloadCap) {}
 
     void feedRequest(const uint8_t* data, size_t len, bool final)
     {

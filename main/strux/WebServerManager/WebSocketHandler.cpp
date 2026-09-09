@@ -3,7 +3,6 @@
 #include "Authenticator.h"
 #include "AuthGate.h"
 #include "WsSessionLink.h"   // the concrete SessionLink for this transport
-#include "SessionStats.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -158,11 +157,7 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         // only need a client slot. A full table (after reaping stale un-authed
         // sockets) refuses the upgrade so the client hits its reconnect loop.
         if (!self->AddWsClient(httpd_req_to_sockfd(req)))
-        {
-            session_stats::bump(session_stats::ws.refused);
             return ESP_FAIL;
-        }
-        session_stats::bump(session_stats::ws.accepted);
         return ESP_OK;
     }
 
@@ -172,7 +167,6 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, sizeof(buf) - 1);
     if (ret != ESP_OK)
     {
-        session_stats::bump(session_stats::ws.recvFail);
         ESP_LOGW(TAG, "WS recv failed: %s", esp_err_to_name(ret));
         self->RemoveWsClient(httpd_req_to_sockfd(req));
         return ret;
@@ -184,7 +178,6 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 
     if (frame.type == HTTPD_WS_TYPE_CLOSE)
     {
-        session_stats::bump(session_stats::ws.frameOther);
         self->RemoveWsClient(httpd_req_to_sockfd(req));
         return ESP_OK;
     }
@@ -192,18 +185,9 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
     if (frame.type == HTTPD_WS_TYPE_BINARY)
     {
         if (frame.len >= session::HEADER_LEN)
-        {
-            session_stats::bump(session_stats::ws.frameData);
             self->HandleBinary(req, buf, frame.len);
-        }
-        else
-        {
-            session_stats::bump(session_stats::ws.frameShort);
-        }
         return ESP_OK;
     }
-
-    session_stats::bump(session_stats::ws.frameOther);
 
     // Inbound TEXT frames are no longer used: requests are binary session
     // chunks and no client sends text. Ignore any stray text frame.
@@ -241,12 +225,11 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
         // that was never coming — every command swallowed, nothing logged. Refuse the
         // session instead, so the failure lands at the caller rather than in a
         // timeout.
-        session_stats::bump(session_stats::ws.noSlot);
         ESP_LOGW(TAG, "frame on fd=%d with no client slot — refusing session %u",
                  fd, (unsigned)sid);
         WsSessionLink link(req, sendMutex_);
         Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-                  sessionInbound_, sizeof(sessionInbound_), &session_stats::ws);
+                  sessionInbound_, sizeof(sessionInbound_));
         s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
         s.reject("connection has no client slot");
         return;
@@ -264,7 +247,7 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     AuthGate gate(*conn, *auth_);
 
     Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-              sessionInbound_, sizeof(sessionInbound_), &session_stats::ws);
+              sessionInbound_, sizeof(sessionInbound_));
     s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
     protocol::RunCommandSession(s, *commandManager_, gate);
 }

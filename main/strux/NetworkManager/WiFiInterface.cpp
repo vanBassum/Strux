@@ -1,5 +1,4 @@
 #include "WiFiInterface.h"
-#include "SessionStats.h"
 
 #include <assert.h>
 #include <cstdio>
@@ -229,10 +228,6 @@ void WiFiInterface::OnWifiEvent(esp_event_base_t event_base, int32_t event_id, v
             // interface's own disconnect echoing back, and retrying on either would
             // burn an attempt that was never made. See NetworkManager's LinkDown arm.
             auto* event = static_cast<wifi_event_sta_disconnected_t*>(event_data);
-            // TEMPORARY DIAGNOSTIC: association losses, counted beside the request
-            // counters so the radio and the transport can be compared on one line.
-            session_stats::bump(session_stats::netDisconnects);
-            session_stats::netLastReason.store(event->reason, std::memory_order_relaxed);
             ESP_LOGW(TAG, "STA disconnected (reason %d)", event->reason);
             RaiseEvent(NetworkEventType::LinkDown, event->reason);
             break;

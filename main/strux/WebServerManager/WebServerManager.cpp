@@ -1,5 +1,4 @@
 #include "WebServerManager.h"
-#include "SessionStats.h"
 #include "ConsoleManager.h"
 #include "SettingsManager.h"
 #include "CommandManager.h"
@@ -51,11 +50,6 @@ void WebServerManager::Init()
             static_cast<WebServerManager*>(ctx)->Broadcast(json, len);
         },
         this);
-
-    // TEMPORARY DIAGNOSTIC: the request-stage counters, dumped straight to the UART
-    // on a slow timer. Not ESP_LOGx — that hook broadcasts down the very transports
-    // being measured.
-    session_stats::StartDump();
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");
