@@ -16,6 +16,9 @@ import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { shellPages, sameRoute, type Route } from "@/shell/registry"
+import { useManifest } from "@/shell/ModuleHost"
+import { declaredPages } from "@/shell/module-registry"
+import { resolveIcon } from "@/shell/icons"
 
 // The sidebar renders navigation; it no longer *defines* it. `shellPages` and the
 // `Route` type moved to shell/registry so that firmware-contributed pages can join
@@ -39,6 +42,10 @@ const statusLabel = {
 
 export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
   const connection = useConnectionStatus()
+  // Drawn from the manifest, so the nav is complete before a single module bundle has
+  // been fetched. That is the property the manifest-as-command exists to protect.
+  const { status } = useManifest()
+  const modulePages = declaredPages()
   const info = useDeviceInfo()
   const release = useLatestRelease()
   const updateAvailable = info && release && isNewerVersion(info.firmware, release.version)
@@ -74,6 +81,29 @@ export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {modulePages.map((page) => {
+                const Icon = resolveIcon(page.icon)
+                return (
+                  <SidebarMenuItem key={`${page.moduleId}/${page.id}`}>
+                    <SidebarMenuButton
+                      isActive={sameRoute(currentRoute, { kind: "module", id: page.id })}
+                      onClick={() => onNavigate({ kind: "module", id: page.id })}
+                    >
+                      <Icon />
+                      <span>{page.title}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+
+              {status === "unsupported" && (
+                <SidebarMenuItem>
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                    This device's UI needs a newer page.
+                  </div>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

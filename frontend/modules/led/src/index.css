@@ -1,0 +1,45 @@
+/* The module's own stylesheet, imported as a string by index.tsx and adopted as a
+   <style> element when the module activates.
+
+   Two deliberate choices here, both load-bearing.
+
+   1. NO PREFLIGHT. `@import "tailwindcss"` would pull in Tailwind's base reset, and
+      this stylesheet is injected into a page that already has one. A second preflight
+      would restyle the shell's own elements from underneath it. So the layers are
+      declared and only theme + utilities are imported; the reset is the host's job and
+      the host has already done it.
+
+   2. The colours are NOT defined, only referenced. The shell publishes design tokens
+      as CSS variables on :root (see frontend/src/index.css) and this module maps them
+      into its own Tailwind theme. That is the contract: tokens, not a shared Tailwind
+      config. A module that hardcoded a palette would look wrong the moment a shell
+      changed one, and the relay's shell has a different component library entirely. */
+
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* Scan THIS module and nothing else. Without it Tailwind's automatic detection walked
+   the whole frontend tree and emitted the shell's utilities into this bundle too —
+   .aspect-square and .z-50 turned up in a file that uses neither, and the inlined
+   stylesheet was several times the size it needed to be. Every byte here is a byte of
+   flash partition. */
+@source "./**/*.{ts,tsx}";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.2);
+}

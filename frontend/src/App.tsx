@@ -8,6 +8,7 @@ import ConsolePage from "@/pages/ConsolePage"
 import SettingsPage from "@/pages/SettingsPage"
 import FirmwarePage from "@/pages/FirmwarePage"
 import LoginPage from "@/pages/LoginPage"
+import { ModulePageView } from "@/shell/ModuleHost"
 
 // `ShellPage` is closed, so this switch stays exhaustive and a new built-in page
 // cannot be added without wiring it here.
@@ -26,16 +27,7 @@ function ShellPageContent({ page }: { page: ShellPage }) {
 
 function RouteContent({ route }: { route: Route }) {
   if (route.kind === "shell") return <ShellPageContent page={route.page} />
-
-  // Module pages arrive in step 4, when ModuleHost lands. Until then the route is
-  // reachable (a bookmark, a hand-typed hash) and has to say something honest — the
-  // same message a declared-but-unregistered module page will get, which is why it
-  // is worth having now rather than falling back to Home and hiding the mismatch.
-  return (
-    <div className="text-sm text-muted-foreground">
-      This device has no UI module <span className="font-mono">{route.id}</span>.
-    </div>
-  )
+  return <ModulePageView pageId={route.id} />
 }
 
 export default function App() {

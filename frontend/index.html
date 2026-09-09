@@ -3,11 +3,49 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Placeholder — replaced at runtime with the device name. -->
+    <!-- Placeholder - replaced at runtime with the device name. -->
     <title>Device</title>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "./assets/host-react.js",
+          "react/jsx-runtime": "./assets/host-jsx-runtime.js"
+        }
+      }
+    </script>
+    <!--
+      The import map is how a firmware-shipped module bundle reaches THIS page's React
+      instead of carrying its own copy. Two React instances is the one thing that
+      genuinely breaks, so it is load-bearing.
+
+      It is written by hand rather than injected because an import map has to precede
+      any module load, and Vite appends its own module tag to the end of head. Vite
+      relocates script elements when it builds, so where the map sits relative to THIS
+      comment is not what ends up in the output - check the built index.html, where
+      what matters is that the map still comes before Vite's injected module script.
+
+      What this comment must not do is contain the characters that open a script
+      element. Vite parses the HTML, and with such a tag written in an earlier version
+      of this text it hoisted the real import map into the comment body, where a
+      browser would never have run it. Nothing warns about that: the map simply stops
+      existing.
+
+      The paths are RELATIVE, and that is what lets one build serve both mount points.
+      Import-map specifiers resolve against the document's base URL, so "./assets/x"
+      becomes /assets/x at the device root and /devices/<id>/assets/x through the
+      relay - the same trick as vite's `base: "./"` and the hash router, for the same
+      reason. The two targets are emitted without a content hash (see vite.config.ts)
+      so this snippet can be static instead of injected by a build plugin.
+
+      Only the production build emits those files, so module loading does not work
+      under `pnpm dev`. That costs nothing today: a module bundle is served by the
+      device, and the dev server proxies to one rather than building any.
+    -->
+
+    <script type="module" src="/src/main.tsx"></script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

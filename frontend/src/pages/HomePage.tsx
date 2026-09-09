@@ -1,7 +1,8 @@
 import { useDeviceInfo } from "@/hooks/use-device-info"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
-import { LedCard } from "@/components/LedCard"
 import { CpuIcon } from "lucide-react"
+import { useModuleCards } from "@/shell/ModuleHost"
+import type { ReactNode } from "react"
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -10,6 +11,10 @@ function formatBytes(bytes: number): string {
 
 export default function HomePage() {
   const info = useDeviceInfo()
+  // The card slot. Every card here is contributed by firmware — the shell ships none
+  // of its own beyond Device Info, so this list is empty on a device with no modules
+  // and that is the template's ordinary state.
+  const cards = useModuleCards()
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -45,7 +50,18 @@ export default function HomePage() {
         )}
       </div>
 
-      <LedCard />
+      {cards.map((card) => (
+        <div key={`${card.moduleId}/${card.id}`}>
+          {card.render ? (
+            (card.render() as ReactNode)
+          ) : card.failure ? (
+            <div className="rounded-xl border bg-card p-6 text-sm text-card-foreground shadow-sm">
+              <span className="font-mono">{card.moduleId}</span> could not be loaded:{" "}
+              {card.failure}
+            </div>
+          ) : null}
+        </div>
+      ))}
     </div>
   )
 }

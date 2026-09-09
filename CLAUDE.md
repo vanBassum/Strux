@@ -79,7 +79,7 @@ Every manager, in either managed layer:
 - has copy/move deleted,
 - initializes in `Init()` guarded by an `InitState` (`lib/rtos/InitState.h`), not in the constructor.
 
-Adding a **framework** manager: create the class, add it to `StruxProvider`, `StruxContext` (member *and* the ordered `Init()`), and `STRUX_SOURCES` + `INCLUDE_DIRS_LIST` in [main/CMakeLists.txt](main/CMakeLists.txt). Adding an **application** manager: the same, against `AppProvider`, `AppContext` and `APP_SOURCES` — and nothing in `strux/` is touched. [main/app/LedManager/](main/app/LedManager/) is the worked example: it owns the board LED and uses it to say whether the device is connected to its relay server — lit while `RelayManager::IsConnected()`, dark otherwise, polled every 250 ms on a `Timer` and mirrored in the dashboard's LED card ([frontend/src/components/LedCard.tsx](frontend/src/components/LedCard.tsx)), which also carries the switch that turns the indication off. Along the way it registers a setting, two commands and a telemetry point without a single edit to the framework — the link state needed no new accessor, because `IsConnected()` was already the framework's own answer. Delete it when the product has real features.
+Adding a **framework** manager: create the class, add it to `StruxProvider`, `StruxContext` (member *and* the ordered `Init()`), and `STRUX_SOURCES` + `INCLUDE_DIRS_LIST` in [main/CMakeLists.txt](main/CMakeLists.txt). Adding an **application** manager: the same, against `AppProvider`, `AppContext` and `APP_SOURCES` — and nothing in `strux/` is touched. [main/app/LedManager/](main/app/LedManager/) is the worked example: it owns the board LED and uses it to say whether the device is connected to its relay server — lit while `RelayManager::IsConnected()`, dark otherwise, polled every 250 ms on a `Timer`. Along the way it registers a setting, two commands, a telemetry point **and a UI contribution** without a single edit to the framework — the link state needed no new accessor, because `IsConnected()` was already the framework's own answer. Its browser half is not in the shell at all: it ships as a UI module ([frontend/modules/led/](frontend/modules/led/), see *Device-hosted UI modules* below), so deleting the example when the product has real features means deleting one manager and one module folder and nothing else.
 
 Note: the two source lists are separated so a fork does not fight the template over one file, but they are still *one* file and still one ESP-IDF component. Making `strux/` a real component is the step that would make syncing a pull rather than a merge; it has not been taken.
 
@@ -127,6 +127,49 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
 
 **A key is at most 15 characters** — NVS's limit, asserted in `Register()` at *runtime*, so an over-long key compiles fine and then boot-loops the device on the assert. Nothing catches it earlier. `telemetry.enabled` (17) does not fit; `telem.enabled` does.
+
+### Device-hosted UI modules
+
+Neither shell knows any device's features at build time. The **firmware** declares its
+UI and ships the bundle that draws it, so a module can never disagree with the firmware
+it talks to — module and firmware come out of the same `www` build.
+
+- **The manifest is a command, not a file.** `ui modules` ([UiManager](main/strux/UiManager/))
+  answers with `hostApi` plus the modules, their pages and their cards. Nothing about a
+  module travels over HTTP except the bundle itself, and device HTTP still serves only
+  static files to a LAN browser.
+- **The app registers its UI** the same way it registers commands and settings: a
+  `UiModule` handed to `UiManager::Register()` from the manager's own `Init()`.
+  `LedManager`'s `uiPages_` / `uiCards_` are the ids, and they must match what the
+  bundle registers.
+- **The contract is one file with no imports** ([frontend/shell-contract/contract.ts](frontend/shell-contract/contract.ts)),
+  because it gets vendored into the relay. It describes nothing below `request`: a
+  module never opens a socket and never imports the shell's backend singleton.
+- **One React, via an import map.** A module builds `react` and `react/jsx-runtime` as
+  external; the shell publishes them at `assets/host-react.js` and
+  `assets/host-jsx-runtime.js` (see [frontend/src/shell/host-react.js](frontend/src/shell/host-react.js))
+  and names them in an import map in `index.html`. Two React copies is the one thing
+  that genuinely breaks — every hook throws — so `pnpm build` runs
+  `scripts/check-modules.mjs`, which fails the build if a module imports a bare
+  specifier the map does not declare or a name the facade does not export. That check
+  exists because the first version of the facade used `export * from "react"`, which
+  compiles, emits, ships, and silently exports nothing usable: React is CommonJS.
+- **A module bundles its own CSS and its own primitives.** Its stylesheet is imported
+  as a string and adopted as a `<style>` on `activate()`, because Vite injects no
+  `<link>` for a chunk pulled in by `import()` — the styles would simply never apply.
+  It imports Tailwind's theme and utilities but **not preflight** (a second reset would
+  restyle the shell) and scopes `@source` to itself (otherwise Tailwind emits the
+  shell's utilities into it too — measured at 61 KB against 14 KB). It styles against
+  the shell's CSS variables, not a shared Tailwind config.
+- **Adding a module:** a folder under `frontend/modules/<id>/` with its own
+  `vite.config.ts` writing `www/modules/<id>.js` (stable name — the firmware names it),
+  a line in `frontend/package.json`'s `build:modules`, and a `UiModule` registration in
+  the manager that owns the feature. [frontend/modules/led/](frontend/modules/led/) is
+  the worked example.
+- **Mixed fleets are the normal case.** Firmware without `ui modules` refuses the
+  command, and a refusal means "no modules" rather than an error; a `hostApi` outside
+  the shell's range omits navigation and says so, leaving Settings, Console and Firmware
+  fully usable.
 
 ### Deliberately out of scope
 
