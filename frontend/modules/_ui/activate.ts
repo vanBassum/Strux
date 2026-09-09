@@ -18,7 +18,24 @@ export function adoptStyles(id: string, css: string): void {
   const style = document.createElement("style")
   style.id = elementId
   style.textContent = css
-  document.head.appendChild(style)
+  // FIRST in <head>, not appended, and this is load-bearing. A module's stylesheet and
+  // the shell's land in the SAME Tailwind `utilities` cascade layer — the layer names
+  // match, so they are one layer, not two — and inside a layer the last matching rule
+  // of equal specificity wins. An appended module sheet therefore outranked the shell
+  // on every class name the two happen to share.
+  //
+  // That is not hypothetical. The shadcn sidebar both shells use is `hidden md:block`;
+  // a module that emits `.hidden` (the firmware module's file input does) beat the
+  // shell's `.md:block` and the sidebar vanished at every width, on a device whose
+  // firmware was blameless. A media query carries no specificity, so nothing broke the
+  // tie. Excluding preflight (see theme.css) stops a module restyling the host's
+  // ELEMENTS; it does nothing about a utility class they both use.
+  //
+  // Going first inverts the tie the right way round: the shell wins the classes it also
+  // defines, and a module still gets every utility the shell never emitted. Shell styles
+  // are always in <head> before any module activates — a <link> in a build, Vite's
+  // injected <style> in dev — so "first child" is reliably ahead of them.
+  document.head.insertBefore(style, document.head.firstChild)
 }
 
 /// Turns anything thrown into something showable.

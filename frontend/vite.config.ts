@@ -102,6 +102,22 @@ export default defineConfig({
   build: {
     outDir: "../www",
     emptyOutDir: true,
+
+    // No modulepreload hints, and this is about the DEVICE's socket budget rather
+    // than about bytes. Because the two host facades are rollup entries, Vite put a
+    // `<link rel="modulepreload">` for each of them in index.html — so a page load
+    // asked the device for four files AT ONCE (app js, css, and both facades) where
+    // before the module work it asked for two. The ESP32's httpd then hit
+    // `accept (23)` — ENFILE, lwIP out of sockets — and reset whichever requests lost
+    // the race, which showed up as a shell with no stylesheet rather than as an
+    // error anyone could read.
+    //
+    // The hints buy nothing here anyway: react and react/jsx-runtime are needed only
+    // once a MODULE is imported, and that cannot happen until the manifest has come
+    // back over the WebSocket — a round trip later. The import map still resolves
+    // them on demand. So this drops two concurrent requests from the one moment the
+    // device is busiest, and delays nothing that was on the critical path.
+    modulePreload: false,
     rollupOptions: {
       // Without this, Rollup is free to DROP an entry's declared exports when it can
       // serve the same code as a plain shared chunk — and it did: host-react.js came

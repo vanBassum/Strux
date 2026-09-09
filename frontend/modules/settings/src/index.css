@@ -1,1 +1,5 @@
 @import "../../_ui/module.css";
+
+/* This module's own tree. `@source` resolves against the file that declares it,
+   so this cannot live in the shared module.css without scanning the siblings too. */
+@source "./**/*.{ts,tsx}";

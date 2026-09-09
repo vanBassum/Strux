@@ -1,9 +1,17 @@
-/* What a module's own index.css imports. Kept beside the primitives because the
-   `@source` globs below are relative to THIS file, so a module gets both its own tree
-   and the shared kit scanned by importing one thing.
+/* What a module's own index.css imports: the layer order, Tailwind's theme and
+   utilities, and the mapping of the shell's design tokens into a Tailwind theme.
 
    See theme.css for why there is no preflight and why no colour is defined here. */
 @import "./theme.css";
 
+/* The shared kit, and only the shared kit.
+
+   A `@source` glob resolves against the file that DECLARES it, so a module cannot
+   scope one to itself from in here. That is why each module's own index.css declares
+   its own tree, and why the second glob that used to sit here is gone: it reached one
+   level up and matched every sibling module, so each bundle carried the utilities of
+   all four. One module's `.hidden` therefore shipped inside modules that never used
+   it, including the LED bundle, which is a device's landing page. Utilities a module
+   does not use are not merely dead weight here: they are rules in a stylesheet the
+   shell shares. */
 @source "./**/*.{ts,tsx}";
-@source "../**/src/**/*.{ts,tsx}";

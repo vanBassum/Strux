@@ -42,3 +42,25 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # together they are a battery-powered fork's decision, not the template's.
 CONFIG_PM_ENABLE=y
 CONFIG_PM_DFS_INIT_AUTO=y
+
+# lwIP socket budget, and the reason it cannot stay at IDF's default of 10.
+#
+# esp_http_server reserves 3 sockets for itself on top of `max_open_sockets`, whose
+# default is 7, and it refuses to start if LWIP_MAX_SOCKETS < max_open_sockets + 3.
+# At the default of 10 that inequality is exactly tight: the web server is entitled
+# to the WHOLE budget, and every other socket on the device — the relay's outbound
+# WebSocket, mDNS, SNTP, the DHCP client — is competing for sockets httpd has already
+# claimed. `accept()` then fails with errno 23 (ENFILE) and the server RESETS whichever
+# connections lose the race.
+#
+# That stayed invisible while a page load asked for two files. It stopped being
+# invisible when UI modules put an import map in index.html: four concurrent requests
+# plus the command WebSocket, and the browser silently lost the stylesheet, so the
+# device's own shell came up with no CSS at all. Nothing in the UI could say why —
+# the only evidence was `httpd_accept_conn: error in accept (23)` in the device log.
+#
+# 16 is the option's maximum. httpd's 7 + 3 leaves six for everything else, which is
+# headroom rather than a fit. The frontend also stopped asking for four files at once
+# (see frontend/vite.config.ts, modulePreload) — both halves of that were wrong, and a
+# fork that adds a second listener should read this before trusting the default again.
+CONFIG_LWIP_MAX_SOCKETS=16

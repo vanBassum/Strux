@@ -5,7 +5,7 @@ lands or is dropped — never ticked off in place. Everything else lives in
 `docs/backlog/` (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
-Last updated 2026-09-09.
+Last updated 2026-09-10.
 
 ## Now
 
@@ -24,6 +24,24 @@ finding the name of a device command. The contract is at `hostApi` 2 — it grew
 `download` and `logs`, because three of the four pages needed something `request`
 cannot say.
 → [`reasoning/…a-shell-that-owns-no-page…`](reasoning/2026-09-09-23h10-a-shell-that-owns-no-page-is-the-only-shell-that-knows-no-commands.md)
+
+**Two bugs found in the module seam and fixed, one verification outstanding.** A
+module's stylesheet shared the shell's `utilities` cascade layer and was appended last,
+so its `.hidden` beat the shadcn sidebar's `md:block` and the sidebar vanished — in both
+shells, on blameless firmware. `adoptStyles` now inserts at the front of `<head>` so a
+module loses every tie. Separately, the import map's two `modulepreload` hints took a
+page load from two concurrent requests to four, and the device's socket table
+(`LWIP_MAX_SOCKETS=10`, of which httpd may claim all ten) ran out — `accept (23)`,
+ENFILE — silently resetting whichever asset lost. Now 16 sockets and no preload hints.
+→ [`reasoning/…dropping-preflight…`](reasoning/2026-09-09-23h55-dropping-preflight-isolates-a-modules-elements-not-its-utilities.md),
+[`reasoning/…the-socket-budget…`](reasoning/2026-09-10-00h10-the-socket-budget-was-sized-for-a-two-file-page.md)
+
+**Outstanding: the bench C3 needs its WiFi back.** Reflashing it to 0.0.7 left NVS
+without a network, so it came up on `Strux-AP-9EA851` and the relay is disabled. Both
+fixes are in the flashed firmware but neither has been confirmed on a device over the
+LAN — the cascade fix is proven in a live shell and against the built bundle, the socket
+fix only at config and build level. Reprovision, then check: the device shell keeps its
+sidebar on the LED landing page, and a cold load fetches every asset without a reset.
 
 **Known gaps**, both small and both written down where they can be acted on: an upload
 does not surface the device's own flash position (only the browser's upload progress),

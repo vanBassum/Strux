@@ -185,7 +185,15 @@ device command at all.
   `activate()`, because Vite injects no `<link>` for a chunk pulled in by `import()` —
   the styles would simply never apply. It imports Tailwind's theme and utilities but
   **not preflight** (a second reset would restyle the shell) and scopes `@source` to
-  itself and `_ui`.
+  itself and `_ui` — each module declares its own tree, because a glob in the shared
+  `module.css` reached the siblings and put every module's utilities in every bundle.
+  **The `<style>` goes FIRST in `<head>`, not last.** A shell and a module are both
+  Tailwind v4, so both emit `@layer utilities`, and same-named layers are one layer per
+  document; inside a layer, equal specificity is decided by document order. Appended, a
+  module's `.hidden` beat the sidebar's `md:block` — a media query has no specificity —
+  and the sidebar vanished in both shells. Going first makes the module lose every tie,
+  which is the intended relationship. Dropping preflight only stops a module restyling
+  the host's *elements*; it says nothing about a utility class they share.
 - **Adding a module:** a folder under `frontend/modules/<id>/` whose `vite.config.ts`
   is one call to `moduleConfig(import.meta.dirname, "<id>")`, a line in
   `frontend/package.json`'s `build:modules` and `typecheck`, and a `UiModule`
