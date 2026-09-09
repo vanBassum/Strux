@@ -4,6 +4,7 @@
 # get them if this lived there. Nothing in here knows about a layer; that is the test
 # for whether a thing belongs.
 set(LIB_SOURCES
+    "lib/protocol/SessionStats.cpp"
     "lib/system/DateTime.cpp"
     "lib/system/TimeSpan.cpp"
 )

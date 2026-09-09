@@ -1,4 +1,5 @@
 #include "RelayManager.h"
+#include "SessionStats.h"
 #include "SettingsManager.h"
 #include "NetworkManager.h"
 #include "WebServerManager.h"
@@ -312,6 +313,7 @@ void RelayManager::OnConnected()
 
     // Says WHY the pipe is open, which is no longer "nobody set a password": this
     // interface authenticates by its own dial-out, so web.password never gated it.
+    session_stats::bump(session_stats::relay.accepted);
     ESP_LOGI(TAG, "Connected as '%s' (relay interface — authenticated by dialling out)",
              deviceId_);
 }
@@ -371,7 +373,11 @@ void RelayManager::OnDisconnected()
 
 void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
 {
-    if (len < session::HEADER_LEN) return;
+    if (len < session::HEADER_LEN)
+    {
+        session_stats::bump(session_stats::relay.frameShort);
+        return;
+    }
 
     uint16_t sid   = session::readU16(frame);
     uint8_t  flags = frame[2];
@@ -386,6 +392,7 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
     {
         if (sid == skipSid_)
         {
+            session_stats::bump(session_stats::relay.frameSkipped);
             if (final)
             {
                 skipping_ = false;
@@ -403,8 +410,9 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
     RelaySessionLink link(socket_);
     AuthGate gate(conn_, *auth_);
 
+    session_stats::bump(session_stats::relay.frameData);
     Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-              sessionInbound_, sizeof(sessionInbound_));
+              sessionInbound_, sizeof(sessionInbound_), &session_stats::relay);
     s.feedRequest(payload, plen, final);
     protocol::RunCommandSession(s, strux_.getCommandManager(), gate);
 
