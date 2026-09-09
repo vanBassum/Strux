@@ -36,10 +36,19 @@ type ButtonVariant = "default" | "outline" | "ghost" | "destructive"
 type ButtonSize = "sm" | "default" | "icon"
 
 const BUTTON_VARIANT: Record<ButtonVariant, string> = {
-  default: "bg-primary text-primary-foreground hover:opacity-90",
-  outline: "border bg-transparent hover:bg-muted",
-  ghost: "bg-transparent hover:bg-muted",
-  destructive: "bg-destructive text-white hover:opacity-90",
+  // EVERY variant names its own border colour, and the base names none. That is not
+  // style, it is the only order-independent way to write this. Two border-colour
+  // utilities on one element tie on specificity, so the winner is whichever Tailwind
+  // emitted LAST — and it emits `.border-border` BEFORE `.border-transparent`, so a
+  // base of `border-transparent` cannot be overridden by a variant at all. That is
+  // what made every outline button here a transparent border on a transparent
+  // background: the right box with no visible control, on Refresh, Upload, Download,
+  // Revert, Reboot, Scan and Clear alike. One colour utility per button, no tie, no
+  // dependence on emission order.
+  default: "border-transparent bg-primary text-primary-foreground hover:opacity-90",
+  outline: "border-border bg-background hover:bg-muted",
+  ghost: "border-transparent bg-transparent hover:bg-muted",
+  destructive: "border-transparent bg-destructive text-white hover:opacity-90",
 }
 
 const BUTTON_SIZE: Record<ButtonSize, string> = {
@@ -61,7 +70,7 @@ export function Button({
     <button
       type="button"
       className={cx(
-        "inline-flex shrink-0 items-center justify-center rounded-md border border-transparent font-medium whitespace-nowrap transition-colors",
+        "inline-flex shrink-0 items-center justify-center rounded-md border font-medium whitespace-nowrap transition-colors",
         "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
         "disabled:pointer-events-none disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
@@ -151,7 +160,7 @@ export function Panel({
   return (
     <div
       className={cx(
-        "bg-card text-card-foreground rounded-xl border p-4 shadow-sm",
+        "bg-card text-card-foreground rounded-xl border border-border p-4 shadow-sm",
         className,
       )}
     >
@@ -217,7 +226,7 @@ export function Modal({
         onClose()
       }}
       onClose={onClose}
-      className="bg-card text-card-foreground m-auto w-[min(28rem,92vw)] rounded-xl border p-5 shadow-lg backdrop:bg-black/50"
+      className="bg-card text-card-foreground m-auto w-[min(28rem,92vw)] rounded-xl border border-border p-5 shadow-lg backdrop:bg-black/50"
     >
       <h2 className="mb-2 text-base font-semibold">{title}</h2>
       <div className="text-sm">{children}</div>
