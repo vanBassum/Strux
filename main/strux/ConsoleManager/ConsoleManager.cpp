@@ -156,15 +156,38 @@ void ConsoleManager::BroadcastTaskLoop()
 
 void ConsoleManager::WriteHistory(ReplyObject& resp) const
 {
-    LOCK(mutex_);
+    // The lock is NOT held across the writes to `resp`, and that is the whole point
+    // of the shape below. `resp` goes to the transport on every value, so writing 200
+    // lines under this mutex holds it for the length of a 40 KB network reply — while
+    // StoreLine takes the same mutex from whatever task just logged, which includes
+    // the Wi-Fi and lwIP tasks. Opening the Console page could therefore stall the
+    // network stack for as long as its own reply took to send.
+    //
+    // That is the same defect as the one this branch was opened to chase: a
+    // network-speed operation blocking a task that only wanted to log a line. So
+    // snapshot the bounds, then copy one line at a time and release between lines.
+    int32_t start = 0;
+    int32_t total = 0;
+    {
+        LOCK(mutex_);
+        total = count_;
+        start = (count_ < MAX_LINES) ? 0 : head_;
+    }
 
     auto lines = resp.array("lines");
 
-    int32_t start = (count_ < MAX_LINES) ? 0 : head_;
-    for (int32_t i = 0; i < count_; i++)
+    for (int32_t i = 0; i < total; i++)
     {
-        int32_t idx = (start + i) % MAX_LINES;
-        lines.value(lines_[idx]);
+        // One line, one short lock. If the ring wraps while this reply is streaming,
+        // a slot may hold a newer line than it did at the snapshot — a log dump can
+        // live with that, and it is a much better trade than the alternative.
+        char line[MAX_LINE_LEN];
+        {
+            LOCK(mutex_);
+            const int32_t idx = (start + i) % MAX_LINES;
+            snprintf(line, sizeof(line), "%s", lines_[idx]);
+        }
+        lines.value(line);
     }
 }   // `lines` closes here; caller's `resp` stays usable (auto-detached)
 

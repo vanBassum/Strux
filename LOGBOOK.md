@@ -173,3 +173,31 @@ logging stops, so does the stalling.
 Boot 5 of the full-Strux run lost 195/600 (32.5 %) but with **p50 2.8 ms, p99
 14 ms** — latency perfect. That is a short outage, not the console fault, and needs
 its own investigation.
+
+### 2026-09-09 19:30 — Fix holds under full concurrent load
+Steady state, no reboots, everything enabled, three loads at once (UDP measurement +
+WebSocket command loop + bulk HTTP off port 80 + relay-proxied fetches):
+
+- UDP: **20/20 batches, 0.0 % loss**, `late` 5–18 per 600.
+- WebSocket: **321/321 commands OK**, 53–71 ms each. Before the fix the same test
+  produced 8-second timeouts and 11 failures in 30.
+- Device counters: `rx=2400 tx=2400 txerr=0 txeno=0`, `ws frm/in/out/fin` all equal,
+  `relay txf=0`.
+
+Also verified the fix costs no observability: with UART primary + USB secondary,
+both `ESP_LOGx` **and** `esp_rom_printf` still arrive over the USB-C port. The
+overlay comment that justified the primary slot was simply wrong.
+
+`CONFIG_PM_ENABLE` re-enabled and now harmless — p50 2.7 ms, p90 5.0 ms. The
+multi-second latency previously blamed on PM was the console all along.
+
+### 2026-09-09 19:40 — Fixed a second instance of the same class
+`ConsoleManager::WriteHistory` held the log mutex across writes to `resp`, which go
+to the transport on every value — so a `log list` (the frontend's Console page) held
+that mutex for the length of a 40 KB network reply, while `StoreLine` takes the same
+mutex from whatever task just logged, Wi-Fi and lwIP included.
+
+Same defect as the root cause: a network-speed operation blocking a task that only
+wanted to log. Now snapshots the ring bounds, then copies one line at a time and
+releases between lines. A wrap mid-reply can show a newer line in a slot; a log dump
+can live with that.

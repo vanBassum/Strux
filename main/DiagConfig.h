@@ -31,7 +31,7 @@
 // Reboot churn is the reproduction trigger, and it must not depend on the command
 // surface — the whole point of the bisection is to delete that. So the device
 // reboots itself, and the harness only has to watch the link come and go.
-#define DIAG_AUTO_REBOOT_S     75
+#define DIAG_AUTO_REBOOT_S     0
 
 // The three remaining runtime differences between minimal Strux and wifiprobe.
 // The sdkconfig for ESP_WIFI/LWIP is byte-identical between the two projects
