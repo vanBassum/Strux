@@ -123,6 +123,33 @@ esp_err_t StaticFileHandler::Handle(httpd_req_t* req)
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
     }
 
+    // Caching, and it has to be told rather than left to the browser.
+    //
+    // This server sent no Cache-Control, no ETag and no Last-Modified, which does
+    // not mean "do not cache" — it means the browser may guess, and Chrome guesses
+    // yes. Combined with the one URL shape here that is deliberately STABLE, that
+    // guess is wrong in the worst way: `/modules/<id>.js` carries no content hash
+    // because the FIRMWARE names it in `ui modules`, so a module updated by an OTA
+    // of the www partition kept being served from disk cache and the new UI simply
+    // did not appear. Nothing was broken and nothing said so.
+    //
+    // Two rules, decided by whether the name identifies the bytes:
+    //   /assets/<name>-<hash>.js  content-hashed by the build, so a change is a new
+    //                             URL and the old one can be kept forever.
+    //   everything else           index.html and the module bundles, whose names are
+    //                             stable, so they must be revalidated every load.
+    //
+    // `no-cache` rather than `no-store`: the browser may still keep the bytes, it
+    // just may not use them without asking. There is nothing to revalidate WITH yet
+    // — no ETag — so today that is a plain refetch, which is what an ESP32 serving a
+    // page a handful of times a day should do. An ETag is the optimisation, not the
+    // fix.
+    const bool hashedAsset = strncmp(req->uri, "/assets/", 8) == 0;
+    httpd_resp_set_hdr(
+        req,
+        "Cache-Control",
+        hashedAsset ? "public, max-age=31536000, immutable" : "no-cache");
+
     char readBuf[512];
     size_t n;
     while ((n = fread(readBuf, 1, sizeof(readBuf), f)) > 0)

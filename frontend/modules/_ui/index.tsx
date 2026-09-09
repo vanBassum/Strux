@@ -155,6 +155,7 @@ export function Panel({
   title,
   actions,
   className,
+  flush,
   children,
 }: {
   /** So a page can give a section a scroll target without wrapping it in a div. */
@@ -162,27 +163,29 @@ export function Panel({
   title?: ReactNode
   actions?: ReactNode
   className?: string
+  /** Body without padding, for a divided list that should meet the card's edges. */
+  flush?: boolean
   children?: ReactNode
 }) {
   return (
     <div
       id={id}
       className={cx(
-        "bg-card text-card-foreground ring-foreground/10 rounded-xl p-4 text-sm ring-1",
+        "bg-card text-card-foreground border-border rounded-xl border text-sm shadow-sm",
         className,
       )}
     >
       {(title || actions) && (
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="border-border flex items-center justify-between gap-3 border-b p-4">
           {typeof title === "string" ? (
-            <h2 className="text-sm font-medium">{title}</h2>
+            <h2 className="text-lg font-semibold">{title}</h2>
           ) : (
             title
           )}
           {actions}
         </div>
       )}
-      {children}
+      <div className={flush ? undefined : "p-4"}>{children}</div>
     </div>
   )
 }
@@ -234,7 +237,7 @@ export function Modal({
         onClose()
       }}
       onClose={onClose}
-      className="bg-popover text-popover-foreground ring-foreground/10 m-auto w-[min(28rem,92vw)] rounded-xl p-4 text-sm ring-1 backdrop:bg-black/50"
+      className="bg-card text-card-foreground border-border m-auto w-[min(28rem,92vw)] rounded-xl border p-5 text-sm shadow-lg backdrop:bg-black/50"
     >
       <h2 className="mb-2 text-base font-semibold">{title}</h2>
       <div className="text-sm">{children}</div>

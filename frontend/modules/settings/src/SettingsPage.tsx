@@ -248,6 +248,12 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
           />
         </div>
 
+        {dirty.length > 0 && (
+          <p className="text-sm text-amber-600 dark:text-amber-500">
+            Unsaved changes — press Save to write to flash.
+          </p>
+        )}
+
         {!entries ? (
           <Panel>Reading the device…</Panel>
         ) : groups.length === 0 ? (
@@ -259,15 +265,19 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
               id={`settings-${group.prefix}`}
               title={group.label}
               className="scroll-mt-2"
+              flush
             >
-              <div className="space-y-3">
+              <ul className="divide-border divide-y">
                 {group.items.map((entry) => {
                   const current = entry.key in edits ? edits[entry.key] : entry.value
                   const changed = entry.key in edits
                   const secret = isSecret(entry.key)
 
                   return (
-                    <div key={entry.key} className="flex items-center justify-between gap-4">
+                    <li
+                      key={entry.key}
+                      className="flex items-center justify-between gap-4 p-4"
+                    >
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 text-sm">
                           {secret && <LockIcon className="text-muted-foreground size-3.5 shrink-0" />}
@@ -309,10 +319,10 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
                           />
                         )}
                       </div>
-                    </div>
+                    </li>
                   )
                 })}
-              </div>
+              </ul>
             </Panel>
           ))
         )}
@@ -358,7 +368,7 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
           the page renders, so it cannot list a section that is not there — and it
           follows the filter, which is why it is not a static list of prefixes. */}
       <aside className="sticky top-0 hidden w-48 shrink-0 lg:block">
-        <p className="text-muted-foreground mb-2 px-2 text-xs font-medium tracking-wide uppercase">
+        <p className="text-muted-foreground mb-3 px-3 text-xs font-semibold tracking-wider uppercase">
           On this page
         </p>
         <nav className="space-y-0.5">
@@ -366,7 +376,7 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
             <button
               key={group.prefix}
               type="button"
-              className="text-muted-foreground hover:bg-muted hover:text-foreground block w-full truncate rounded-md px-2 py-1 text-left text-sm"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground block w-full truncate rounded-md px-3 py-1.5 text-left text-sm transition-colors"
               onClick={() =>
                 document
                   .getElementById(`settings-${group.prefix}`)
