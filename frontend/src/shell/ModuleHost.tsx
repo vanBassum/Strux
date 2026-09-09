@@ -26,20 +26,43 @@ function useRegistry() {
 
 // ── Reading the manifest ──────────────────────────────────────────────────────
 
-/// Runs once per connection. Any refusal means "this device has no modules", which is
-/// the mixed-fleet case and not a failure — see §7 of the design.
+/// One read per connection, shared by every caller. Any refusal means "this device has
+/// no modules", which is the mixed-fleet case and not a failure — see §7 of the design.
+///
+/// Deduplicated across callers AND across React's remounts, which is worth the six
+/// lines. Two components ask (the sidebar and the home screen), and in development
+/// StrictMode mounts each one twice — so the naive version issued FOUR reads of the
+/// same manifest, three of whose results were thrown away by the cleanup that had
+/// already run. Each one is a round trip that queues behind every other command on the
+/// device's single in-flight pipe, which is why the home screen took seconds to fill
+/// in on a dev server and why the wasted reads were worth noticing rather than
+/// tolerating.
+///
+/// Keyed on nothing: there is one device on the other end of this socket, so one
+/// in-flight read is the whole state. Cleared when the connection drops, because the
+/// answer belongs to that connection — a device may have been reflashed before the
+/// next one.
+let manifestRead: Promise<void> | null = null
+
 export function useManifest() {
   const connection = useConnectionStatus()
   useRegistry()
 
   useEffect(() => {
-    if (connection !== "connected") return
-    let cancelled = false
+    if (connection !== "connected") {
+      // A dropped connection invalidates the answer, not just the request in flight.
+      manifestRead = null
+      return
+    }
+    if (manifestRead) return
 
-    backend
+    manifestRead = backend
       .send<UiManifest>("ui modules")
       .then((manifest) => {
-        if (cancelled) return
+        // No `cancelled` guard, and its absence is the point: the result goes into the
+        // registry, which outlives any one component, and every caller reads it from
+        // there. Discarding a reply because the component that happened to ask for it
+        // has re-rendered is what made three of four reads pointless.
         const range = manifest?.hostApi
         if (!range || typeof range.min !== "number" || typeof range.max !== "number") {
           registry.setAbsent()
@@ -56,12 +79,8 @@ export function useManifest() {
       .catch(() => {
         // Rejected, unknown command, or timed out — all of them mean the same thing
         // to a shell, and none of them is worth a toast.
-        if (!cancelled) registry.setAbsent()
+        registry.setAbsent()
       })
-
-    return () => {
-      cancelled = true
-    }
   }, [connection])
 
   return {
