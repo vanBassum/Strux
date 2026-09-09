@@ -201,3 +201,56 @@ Same defect as the root cause: a network-speed operation blocking a task that on
 wanted to log. Now snapshots the ring bounds, then copies one line at a time and
 releases between lines. A wrap mid-reply can show a newer line in a slot; a log dump
 can live with that.
+
+### 2026-09-09 20:10 — Stress round: at control parity
+Both fixes, everything enabled. Same instrument throughout.
+
+| case | loss | rtt |
+|---|---|---|
+| 8 B payload, 2 ms gap, 2000 pkt | 0.0 % | p50 2.7 / p99 11.1 / max 27 ms |
+| 200 B, 2 ms gap, 2000 pkt | 0.0 % | p50 2.8 / p99 10.9 ms |
+| 1400 B, 2 ms gap, 1500 pkt | 0.1 % (1) | p50 4.2 / p99 19.3 ms |
+| 1400 B, 10 ms gap, 1000 pkt | 0.0 % | p50 5.1 / p99 20.0 ms |
+| 200 B sustained, 3000 pkt | 0.0 % | p50 4.4 / p99 14.9 ms |
+| UDP during 15× `log list` | 0.0 % | p50 4.3 / p99 14.4 ms |
+
+- ICMP, 200 packets: **198 received (1 % loss), avg 3 ms** — against 78 % loss and
+  24 ms before.
+- Command surface: 60/60 on one socket.
+
+### 2026-09-09 20:25 — The residual is the environment, not Strux
+20-boot churn regression showed 17/20 clean and 3 boots losing a burst *with perfect
+latency* (p50 3–4 ms). Added loss-shape reporting to the instrument, which showed
+each one is **a single contiguous run** — a 1–3 s blackout at a random point, no
+disconnect logged, `txerr=0 txeno=0`.
+
+Not the relay: with `DIAG_ENABLE_RELAY=0` it still happened, 1 boot in 12.
+Not the state machine: the cycle timer is stopped on `Ipv4Acquired` and no
+"restarting the station" or "Lost IP" line ever appears.
+
+The missing control was reboot churn against **wifiprobe**, which had never been
+run. Added self-reboot to the control and measured it the same way:
+
+| firmware | boots | bursts | shape |
+|---|---|---|---|
+| full Strux + fixes | 12 | 1 | 1 run, 97 pkt from seq 503 |
+| wifiprobe (control) | 12 | 2 | 1 run, 101 from 330; 1 run, 57 from 543 |
+
+Statistically identical. **Strux is at parity with a minimal ESP-IDF STA**, so the
+remaining blackout is an AP-side event and not this firmware's to answer for.
+
+### 2026-09-09 20:50 — Guard added so it cannot come back
+A `#error` in `ConsoleManager.cpp` refuses any build where USB Serial/JTAG is the
+**primary** console, naming the mechanism and the one-line fix, with
+`STRUX_ALLOW_BLOCKING_CONSOLE` as a deliberate escape hatch.
+
+It lives there rather than in a board file because that is the code whose safety
+depends on it — `esp_log_set_vprintf` puts `LogOutput` between every task and the
+console, so a blocking console is this manager's problem.
+
+Verified both ways: both boards still build, and reintroducing the bad line refuses
+the build with the explanation. A comment is what failed the first time; the old one
+justified the setting with a real consequence of the wrong mechanism.
+
+### 2026-09-09 20:55 — Final validation, steady state under full load
+No reboots, all managers, relay on, three concurrent loads.

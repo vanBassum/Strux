@@ -9,6 +9,32 @@
 #include <cstring>
 #include <cassert>
 
+// This manager puts one function between every task in the system and the console
+// (esp_log_set_vprintf, below), and LogOutput starts by calling vprintf. So the
+// console's write must never block — if it does, a log line stalls whichever task
+// emitted it, and that includes the Wi-Fi and lwIP tasks.
+//
+// USB Serial/JTAG as the PRIMARY console is a blocking VFS driver: its write waits
+// for FIFO space, which means it waits for a USB host. That configuration cost this
+// project a day of investigation and presented as 78 % packet loss with every
+// command counter reading clean — see
+// docs/reasoning/2026-09-09-20h40-a-console-that-waits-is-a-network-that-drops.md.
+//
+// It is caught here rather than left to a comment in a board file, because a comment
+// is what failed the first time. USB output is not the problem and is not being
+// refused: pick it as the SECONDARY console
+// (CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG), which is a best-effort ROM path
+// that drops instead of waiting, and every byte still reaches the USB port.
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG) && !defined(STRUX_ALLOW_BLOCKING_CONSOLE)
+#error "USB Serial/JTAG is the PRIMARY console, whose write blocks on the USB host. \
+Every task's log line goes through ConsoleManager::LogOutput -> vprintf, so this \
+stalls the Wi-Fi and lwIP tasks and shows up as heavy packet loss. Use \
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y with \
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y instead: USB still carries all \
+output. Define STRUX_ALLOW_BLOCKING_CONSOLE only if you have measured that your \
+build can afford it."
+#endif
+
 ConsoleManager* ConsoleManager::s_instance_ = nullptr;
 
 struct LogQueueItem {
