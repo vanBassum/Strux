@@ -215,7 +215,25 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     // healing). If a worker task ever consumes these pointers (step 6), this needs
     // real locking (copy-under-lock, as the pre-refactor code did).
     WsConnection* conn = registry_.find(fd);
-    if (!conn) return;   // unknown fd (closed mid-frame)
+    if (!conn)
+    {
+        // The socket is live as far as httpd is concerned, but it has no slot. Two
+        // ways in: the broadcast path evicts a slot when a send fails while httpd
+        // keeps the connection, and a refused upgrade (table full) is returned after
+        // esp_http_server has already sent the 101. Returning silently left the
+        // client holding an established socket, waiting out its timeout for a reply
+        // that was never coming — every command swallowed, nothing logged. Refuse the
+        // session instead, so the failure lands at the caller rather than in a
+        // timeout.
+        ESP_LOGW(TAG, "frame on fd=%d with no client slot — refusing session %u",
+                 fd, (unsigned)sid);
+        WsSessionLink link(req, sendMutex_);
+        Session s(sid, link, sessionFrame_, SESSION_WINDOW,
+                  sessionInbound_, sizeof(sessionInbound_));
+        s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
+        s.reject("connection has no client slot");
+        return;
+    }
 
     // The session lives on this stack frame for exactly one dispatch: the first chunk
     // opens it, and its FLAG_FINAL tells the Session whether a body follows (further
