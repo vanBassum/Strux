@@ -35,8 +35,12 @@ class UiManager
     // because one party owns the firmware and both shells (see docs/reasoning). It
     // versions the whole host contract, the frontend runtime included, so a React major
     // in the shells moves it.
-    static constexpr uint32_t HOST_API_MIN = 1;
-    static constexpr uint32_t HOST_API_MAX = 1;
+    // 2 since the contract grew `upload`, `download` and `logs`: a firmware module
+    // that writes a partition or tails the log cannot run on a shell that speaks 1, so
+    // the minimum moved with it. A v1 shell meeting this device says "needs a newer
+    // shell" and keeps working otherwise, which is what the range is for.
+    static constexpr uint32_t HOST_API_MIN = 2;
+    static constexpr uint32_t HOST_API_MAX = 2;
 
 public:
     explicit UiManager(StruxProvider& strux);

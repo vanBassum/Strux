@@ -16,7 +16,7 @@
 // module written against the contract runs unchanged on the relay shell, where
 // `request` is a hub invoke and there is no `backend` to import.
 
-import type { DeviceTransport } from "@shell/contract"
+import type { DeviceLogLine, DeviceTransport } from "@shell/contract"
 import { backend } from "@/lib/backend"
 
 export const deviceTransport: DeviceTransport = {
@@ -26,5 +26,33 @@ export const deviceTransport: DeviceTransport = {
     // the socket closes — exactly the failure semantics the contract promises. There
     // is nothing to translate.
     return backend.send<T>(command, args ?? {})
+  },
+
+  upload<T = unknown>(
+    command: string,
+    args: Record<string, unknown> | undefined,
+    body: Blob,
+    onProgress?: (fraction: number) => void,
+  ): Promise<T> {
+    // Nothing translated here either: `uploadSession` already streams the body in
+    // window-sized chunks and reports the DEVICE's write position, which is the
+    // number the contract promises.
+    return backend.uploadSession<T>(command, args, body, onProgress)
+  },
+
+  download(
+    command: string,
+    args?: Record<string, unknown>,
+    total?: number,
+    onProgress?: (fraction: number) => void,
+  ): Promise<Blob> {
+    return backend.downloadSession(command, args, total, onProgress)
+  },
+
+  logs(handler: (line: DeviceLogLine) => void): () => void {
+    // Session 0, which `backend` already fans out to every subscriber. On this shell
+    // that is a direct read off the device's own socket — the relay's implementation
+    // has a hub group in the middle, and a module cannot tell.
+    return backend.subscribe(handler as (msg: unknown) => void)
   },
 }

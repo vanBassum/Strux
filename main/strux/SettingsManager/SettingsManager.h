@@ -3,6 +3,7 @@
 #include "StruxProvider.h"
 #include "InitState.h"
 #include "CommandEntry.h"
+#include "UiModule.h"
 #include "Setting.h"
 #include "TypedSettings.h"
 #include "Mutex.h"
@@ -80,6 +81,14 @@ private:
     RequestError Cmd_GetSettings(CommandContext& ctx);
     RequestError Cmd_SetSetting(CommandContext& ctx);
     RequestError Cmd_SaveSettings(CommandContext& ctx);
+
+    // ── UI. The browser half of this manager's own commands, shipped as a module
+    // in `www` and declared here so a shell can draw its nav without loading any
+    // module code. It is a module and not a shell page because a shell contributes
+    // nothing to a device's navigation — see docs/reasoning. What makes it the
+    // framework's rather than a product's is `settings list`, which already describes itself — so the page is generated rather than written per product.
+    inline static const UiPage uiPages_[] = { { "settings", "Settings", "settings" } };
+    inline static UiModule uiModule_{ "settings", "/modules/settings.js", uiPages_ };
 
     inline static CommandEntry commands_[] = {
         { "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings> },

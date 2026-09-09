@@ -111,17 +111,6 @@ function buildShell(mod: ManifestModule, deviceId: string, deviceName: string): 
         registry.registerPage(page)
       },
     },
-    cards: {
-      register(card) {
-        if (!mod.cards.includes(card.id)) {
-          console.warn(
-            `[modules] "${mod.id}" registered card "${card.id}", which its manifest does not declare — ignored`,
-          )
-          return
-        }
-        registry.registerCard(card)
-      },
-    },
     ui: {
       notify(message, kind) {
         if (kind === "error") toast.error(message)
@@ -165,27 +154,15 @@ function activate(mod: ManifestModule, deviceId: string, deviceName: string): Pr
   return p
 }
 
-/// Import and activate every module that contributes a dashboard card. Cards are
-/// eager because the dashboard is the landing page; pages are lazy.
-export function useModuleCards() {
+/// The page to land on: the first one the manifest declares.
+///
+/// Declaration ORDER decides it, so the firmware chooses — a product's main feature is
+/// declared first and is therefore the home screen. The shell does not pick a
+/// favourite and has no page of its own to fall back to, which is the point: nothing
+/// in a device's navigation comes from this build.
+export function useLandingPage(): string | null {
   useRegistry()
-  const info = useDeviceInfo()
-  const manifest = registry.getManifest()
-
-  useEffect(() => {
-    if (!manifest) return
-    for (const mod of manifest.modules) {
-      if (mod.cards.length === 0) continue
-      if (registry.isActivated(mod.id) || registry.failureOf(mod.id)) continue
-      void activate(mod, info?.name ?? "device", info?.name ?? "device")
-    }
-  }, [manifest, info?.name])
-
-  return registry.declaredCardIds().map((c) => ({
-    ...c,
-    render: registry.getCard(c.id)?.render,
-    failure: registry.failureOf(c.moduleId),
-  }))
+  return registry.declaredPages()[0]?.id ?? null
 }
 
 /// Render one module page, importing its bundle on first use.

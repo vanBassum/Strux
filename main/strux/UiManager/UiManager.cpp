@@ -50,8 +50,8 @@ void UiManager::Register(std::initializer_list<UiModule*> modules)
         // wwwroot: the module would 404 and the device would look broken.
         assert(m->entry[0] == '/' && "ui module entry must be an absolute www path");
 
-        assert((m->pageCount > 0 || m->cardCount > 0)
-               && "a ui module that contributes nothing has nothing to load for");
+        assert(m->pageCount > 0
+               && "a ui module that contributes no page has nothing to load for");
 
         for (size_t i = 0; i < m->pageCount; ++i)
         {
@@ -59,15 +59,13 @@ void UiManager::Register(std::initializer_list<UiModule*> modules)
             assert(esp_ptr_in_drom(m->pages[i].title) && "page title must be a string literal");
             assert(esp_ptr_in_drom(m->pages[i].icon) && "page icon must be a string literal");
         }
-        for (size_t i = 0; i < m->cardCount; ++i)
-            assert(esp_ptr_in_drom(m->cards[i]) && "card id must be a string literal");
 
         m->registered = true;
         m->next = head_;
         head_ = m;
 
-        ESP_LOGI(TAG, "Registered module '%s' (%u page(s), %u card(s)) at %s",
-                 m->id, (unsigned)m->pageCount, (unsigned)m->cardCount, m->entry);
+        ESP_LOGI(TAG, "Registered module '%s' (%u page(s)) at %s",
+                 m->id, (unsigned)m->pageCount, m->entry);
     }
 }
 
@@ -116,11 +114,6 @@ RequestError UiManager::Cmd_Modules(CommandContext& ctx)
             page.field("title", m->pages[i].title);
             page.field("icon", m->pages[i].icon);
         }
-
-        // Writing to `mod` closes `pages` — see ReplyWriter's scope rules.
-        auto cards = mod.array("cards");
-        for (size_t i = 0; i < m->cardCount; ++i)
-            cards.value(m->cards[i]);
     }
 
     return RequestError::Ok;

@@ -1,4 +1,5 @@
 #include "UpdateManager.h"
+#include "UiManager.h"
 #include "PartitionWriter.h"
 #include "CommandManager.h"
 #include "esp_log.h"
@@ -21,6 +22,9 @@ void UpdateManager::Init()
     }
 
     strux_.getCommandManager().Register(this, commands_);
+    // UiManager initialises after this manager, which is fine: Register() only takes
+    // a mutex and links a chain, exactly like the command table above.
+    strux_.getUiManager().Register({ &uiModule_ });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");

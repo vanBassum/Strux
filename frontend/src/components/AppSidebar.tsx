@@ -16,7 +16,7 @@ import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { DeviceInfoDialog } from "@/components/DeviceInfoDialog"
-import { shellPages, sameRoute, type Route } from "@/shell/registry"
+import { sameRoute, type MaybeRoute, type Route } from "@/shell/registry"
 import { useManifest } from "@/shell/ModuleHost"
 import { declaredPages } from "@/shell/module-registry"
 import { resolveIcon } from "@/shell/icons"
@@ -25,7 +25,8 @@ import { resolveIcon } from "@/shell/icons"
 // `Route` type moved to shell/registry so that firmware-contributed pages can join
 // the same list without a component owning the router's type.
 interface AppSidebarProps {
-  currentRoute: Route
+  /// Null while the manifest has not yet said what pages exist.
+  currentRoute: MaybeRoute
   onNavigate: (route: Route) => void
 }
 
@@ -68,21 +69,6 @@ export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {shellPages.map((item) => (
-                <SidebarMenuItem key={item.page}>
-                  <SidebarMenuButton
-                    isActive={sameRoute(currentRoute, { kind: "shell", page: item.page })}
-                    onClick={() => onNavigate({ kind: "shell", page: item.page })}
-                  >
-                    <item.icon />
-                    <span>{item.title}</span>
-                    {item.page === "firmware" && updateAvailable && (
-                      <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
-                    )}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-
               {modulePages.map((page) => {
                 const Icon = resolveIcon(page.icon)
                 return (
@@ -93,6 +79,14 @@ export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
                     >
                       <Icon />
                       <span>{page.title}</span>
+                      {/* The update dot used to hang off a built-in Firmware page.
+                          There is no built-in page any more, so it hangs off whichever
+                          module declares the id "firmware" — which the framework's own
+                          firmware module does. A product that replaces it keeps the
+                          dot by keeping the id. */}
+                      {page.id === "firmware" && updateAvailable && (
+                        <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 )

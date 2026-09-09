@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && pnpm build:modules && node scripts/check-modules.mjs && node scripts/gzip.mjs",
-    "build:modules": "vite build --config modules/led/vite.config.ts",
-    "typecheck": "tsc -b --force && tsc -p modules/led/tsconfig.json --noEmit",
+    "build:modules": "vite build --config modules/led/vite.config.ts && vite build --config modules/console/vite.config.ts && vite build --config modules/settings/vite.config.ts && vite build --config modules/firmware/vite.config.ts",
+    "typecheck": "tsc -b --force && tsc -p modules/led/tsconfig.json --noEmit && tsc -p modules/console/tsconfig.json --noEmit && tsc -p modules/settings/tsconfig.json --noEmit && tsc -p modules/firmware/tsconfig.json --noEmit",
     "preview": "vite preview"
   },
   "dependencies": {

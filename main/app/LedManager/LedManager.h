@@ -87,13 +87,12 @@ private:
     // reads first, so it can compose a home screen without loading any module code —
     // and the id is what the module's own activate() is matched against.
     //
-    // A CARD and no page, deliberately. This is the one thing the demo device does, so
-    // it belongs on the home screen rather than behind a sidebar entry next to it — a
-    // shell's home is the product, and a page leading to the same two controls would
-    // be a second door into one room. `UiPage` is still there for a module with more
-    // to show than a card can hold; this one has not.
-    inline static const char* const uiCards_[] = { "led" };
-    inline static UiModule uiModule_{ "led", "/modules/led.js", uiCards_ };
+    // Declared FIRST among this firmware's modules, which is how a device says which
+    // of its features is the product: a shell lands on the first page the manifest
+    // declares. The app's own managers Init() after the framework's, so this ends up
+    // ahead of console/settings/firmware in the chain.
+    inline static const UiPage uiPages_[] = { { "led", "LED", "lightbulb" } };
+    inline static UiModule uiModule_{ "led", "/modules/led.js", uiPages_ };
 
     // ── Commands ──
     RequestError Cmd_Get(CommandContext& ctx);

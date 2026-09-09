@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from "react"
-import { hashToRoute, routeToHash, sameRoute, type Route } from "@/shell/registry"
+import {
+  hashToRoute,
+  routeToHash,
+  sameRoute,
+  type MaybeRoute,
+  type Route,
+} from "@/shell/registry"
 
 // The route lives in the HASH, not the path, and that is load-bearing rather
 // than a style choice: this UI is served from two mount points the build cannot
@@ -19,7 +25,10 @@ import { hashToRoute, routeToHash, sameRoute, type Route } from "@/shell/registr
 // hash, write the hash, listen for changes.
 
 export function useRoute() {
-  const [route, setRouteState] = useState<Route>(() =>
+  // MaybeRoute, not Route: there is no page this build can name as a default. Until
+  // the manifest arrives there is genuinely nowhere to be, and pretending otherwise is
+  // what a hardcoded "home" was.
+  const [route, setRouteState] = useState<MaybeRoute>(() =>
     hashToRoute(window.location.hash),
   )
 

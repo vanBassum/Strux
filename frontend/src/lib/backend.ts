@@ -492,6 +492,69 @@ class BackendService {
     return true
   }
 
+  /** One command whose REQUEST has a body: an envelope chunk (not FINAL), then
+   *  `body` streamed on the same session in window-sized pieces, then one reply.
+   *
+   *  The generic form of what `uploadPartition` does by hand. It exists because
+   *  `partition write` is not the only command shaped like this and, more to the
+   *  point, because a UI module needs to reach this shape through the shell contract
+   *  — and the contract cannot offer a method whose only implementation is
+   *  partition-specific. What is NOT here is the erase-write-activate sequence: that
+   *  is partition policy and belongs to whoever knows about partitions, which is the
+   *  firmware module, not this transport.
+   *
+   *  Runs through the open queue, so nothing else touches the socket mid-upload — the
+   *  device would REJECT an interleaved session id. */
+  async uploadSession<T>(
+    type: string,
+    params: Record<string, unknown> | undefined,
+    body: Blob,
+    onProgress?: (fraction: number) => void,
+  ): Promise<T> {
+    return this.enqueue(async () => {
+      await this.ensureConnected()
+
+      const session = this.allocSession()
+      const total = body.size
+
+      // Progress is DEVICE-driven: the handler streams {"p":<bytesWritten>} as it
+      // works, and those are mapped to a fraction. Client-side "bytes sent" cannot
+      // see the device's write position — the OS buffers the socket — so it would
+      // race to 1 while the write is still in flight.
+      const reply = this.awaitReply<T>(session, {
+        timeoutMs: 120000,
+        onMessage: (msg: Record<string, unknown>) => {
+          if (total && typeof msg.p === "number")
+            onProgress?.(Math.min(1, msg.p / total))
+        },
+      })
+
+      const envelope = new TextEncoder().encode(
+        JSON.stringify({ type, ...(params ?? {}) }) + "\n",
+      )
+      this.sendChunk(session, 0, envelope)
+
+      // CHUNK matches the device's inbound window: a larger frame is refused, not
+      // split.
+      const CHUNK = 4096
+      let sent = 0
+      while (sent < total) {
+        const end = Math.min(sent + CHUNK, total)
+        const slice = new Uint8Array(await body.slice(sent, end).arrayBuffer())
+        const isLast = end >= total
+        await this.drainBuffer()
+        this.sendChunk(session, isLast ? FLAG_FINAL : 0, slice)
+        sent = end
+      }
+      // A zero-length body still needs a FINAL to close the request direction.
+      if (total === 0) this.sendChunk(session, FLAG_FINAL, new Uint8Array(0))
+
+      const result = await reply
+      onProgress?.(1)
+      return result
+    })
+  }
+
   /** Upload a .bin as one streamed `writePartition` session: an envelope chunk
    *  ({"type":"writePartition","partition":...}\n) followed by body chunks, the
    *  last carrying FLAG_FINAL. The device drains it straight to flash and replies
@@ -566,6 +629,60 @@ class BackendService {
     while (this.ws && this.ws.bufferedAmount > limit) {
       await new Promise((r) => setTimeout(r, 20))
     }
+  }
+
+  /** One command whose REPLY is a stream: the envelope goes out as a single FINAL
+   *  chunk and the device writes bytes back until it FINALs, with no length header.
+   *
+   *  The generic form of `downloadPartitionFile`, and the mirror of `uploadSession`.
+   *  It stops at the bytes on purpose: saving a file is a host concern — an anchor
+   *  click here, something else in another shell — while "give me the bytes" is the
+   *  same question everywhere, which is what makes it expressible in the contract.
+   *
+   *  `total`, when the caller knows it, is used for progress AND for a length check.
+   *  The device always streams a whole partition, so a short read means a mid-stream
+   *  flash or socket failure produced a truncated image followed by a FINAL — which
+   *  would otherwise be saved as a corrupt file that looks fine.
+   *
+   *  Runs through the open queue, so it owns the socket until it finishes: the device
+   *  would REJECT an interleaved session id. */
+  async downloadSession(
+    type: string,
+    params: Record<string, unknown> | undefined,
+    total?: number,
+    onProgress?: (fraction: number) => void,
+  ): Promise<Blob> {
+    const buf = await this.enqueue(async () => {
+      await this.ensureConnected()
+      const session = this.allocSession()
+      const reply = this.awaitReply<Uint8Array<ArrayBuffer>>(session, {
+        timeoutMs: 120000,
+        binary: true,
+        onData: (received) => {
+          if (total) onProgress?.(Math.min(1, received / total))
+        },
+      })
+      const body = new TextEncoder().encode(
+        JSON.stringify({ type, ...(params ?? {}) }) + "\n",
+      )
+      this.sendChunk(session, FLAG_FINAL, body)
+      return reply
+    })
+
+    // A short reply that parses as a JSON error means the device refused instead of
+    // streaming bytes — an unknown partition, say. It arrives as a successful reply,
+    // so it has to be read out of the payload or a failure becomes a tiny "image".
+    if (buf.length < 256) {
+      const text = new TextDecoder().decode(buf)
+      if (text.startsWith('{"ok":false'))
+        throw new Error(JSON.parse(text).error ?? "download failed")
+    }
+
+    if (total && buf.length !== total)
+      throw new Error(`incomplete download: got ${buf.length} of ${total} bytes`)
+
+    onProgress?.(1)
+    return new Blob([buf])
   }
 
   /** Download a partition image as one outbound streamed session and save it as

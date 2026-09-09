@@ -8,12 +8,7 @@
 //
 // Nothing here imports a module or knows a module's shape. It holds ids and thunks.
 
-import type {
-  ManifestModule,
-  ModuleCard,
-  ModulePage,
-  UiManifest,
-} from "@shell/contract"
+import type { ManifestModule, ModulePage, UiManifest } from "@shell/contract"
 
 /// Where the shell is in the process of learning what this device offers.
 ///
@@ -34,7 +29,6 @@ interface State {
   /// Bundles that have been imported and activated, so it happens once per id.
   activated: Set<string>
   pages: Map<string, ModulePage>
-  cards: Map<string, ModuleCard>
 }
 
 const state: State = {
@@ -44,7 +38,6 @@ const state: State = {
   failed: new Map(),
   activated: new Set(),
   pages: new Map(),
-  cards: new Map(),
 }
 
 const listeners = new Set<() => void>()
@@ -110,12 +103,6 @@ export function declaredPages(): { moduleId: string; id: string; title: string; 
   )
 }
 
-export function declaredCardIds(): { moduleId: string; id: string }[] {
-  const m = state.manifest
-  if (!m) return []
-  return m.modules.flatMap((mod) => mod.cards.map((id) => ({ moduleId: mod.id, id })))
-}
-
 export function findDeclaringModule(pageId: string): ManifestModule | null {
   const m = state.manifest
   if (!m) return null
@@ -133,18 +120,8 @@ export function registerPage(page: ModulePage) {
   changed()
 }
 
-export function registerCard(card: ModuleCard) {
-  if (state.cards.has(card.id))
-    console.warn(`[modules] card "${card.id}" registered twice; last one wins`)
-  state.cards.set(card.id, card)
-  changed()
-}
-
 export function getPage(id: string): ModulePage | undefined {
   return state.pages.get(id)
-}
-export function getCard(id: string): ModuleCard | undefined {
-  return state.cards.get(id)
 }
 
 export function isActivated(moduleId: string): boolean {
@@ -171,6 +148,5 @@ export function reset() {
   state.failed.clear()
   state.activated.clear()
   state.pages.clear()
-  state.cards.clear()
   changed()
 }

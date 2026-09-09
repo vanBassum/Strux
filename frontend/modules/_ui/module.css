@@ -1,0 +1,9 @@
+/* What a module's own index.css imports. Kept beside the primitives because the
+   `@source` globs below are relative to THIS file, so a module gets both its own tree
+   and the shared kit scanned by importing one thing.
+
+   See theme.css for why there is no preflight and why no colour is defined here. */
+@import "./theme.css";
+
+@source "./**/*.{ts,tsx}";
+@source "../**/src/**/*.{ts,tsx}";

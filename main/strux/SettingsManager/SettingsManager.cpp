@@ -1,4 +1,5 @@
 #include "SettingsManager.h"
+#include "UiManager.h"
 #include "CommandManager.h"
 #include "ContextLock.h"
 #include "JsonReader.h"
@@ -30,6 +31,9 @@ void SettingsManager::Init()
     // Registered before the NVS work so the commands exist even if NVS
     // fails to open (getSettings then reports defaults).
     strux_.getCommandManager().Register(this, commands_);
+    // UiManager initialises after this manager, which is fine: Register() only takes
+    // a mutex and links a chain, exactly like the command table above.
+    strux_.getUiManager().Register({ &uiModule_ });
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)

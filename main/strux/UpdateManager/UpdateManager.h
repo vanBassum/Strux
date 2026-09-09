@@ -3,6 +3,7 @@
 #include "StruxProvider.h"
 #include "InitState.h"
 #include "CommandEntry.h"
+#include "UiModule.h"
 #include <esp_ota_ops.h>
 
 class Stream;
@@ -76,6 +77,14 @@ private:
 
     /// Validate an app image and make it the next boot slot. No-op for data.
     RequestError Cmd_ActivatePartition(CommandContext& ctx);
+
+    // ── UI. The browser half of this manager's own commands, shipped as a module
+    // in `www` and declared here so a shell can draw its nav without loading any
+    // module code. It is a module and not a shell page because a shell contributes
+    // nothing to a device's navigation — see docs/reasoning. What makes it the
+    // framework's rather than a product's is the partition table and the `partition` commands, which this manager owns.
+    inline static const UiPage uiPages_[] = { { "firmware", "Firmware", "download" } };
+    inline static UiModule uiModule_{ "firmware", "/modules/firmware.js", uiPages_ };
 
     inline static CommandEntry commands_[] = {
         { "partition", "status",   &InvokeCommand<&UpdateManager::Cmd_UpdateStatus> },

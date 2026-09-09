@@ -1,0 +1,51 @@
+/* The stylesheet every module imports, and the reason it is shared.
+ *
+ * Each module bundles its own CSS as a string and adopts it on activate() — see any
+ * module's index.tsx for why. What was duplicated in every one of them was this: the
+ * layer order, the theme/utilities imports, and the mapping of the shell's CSS
+ * variables into a Tailwind theme. Four copies of that is four chances to drift.
+ *
+ * Two choices here are load-bearing and neither is a preference.
+ *
+ * 1. NO PREFLIGHT. `@import "tailwindcss"` would pull Tailwind's base reset, and this
+ *    is injected into a page that already has one. A second preflight would restyle
+ *    the host's own elements from underneath it. The reset is the shell's job and the
+ *    shell has already done it.
+ *
+ * 2. The colours are REFERENCED, never defined. Both shells publish design tokens as
+ *    CSS variables on :root, and this maps them into a Tailwind theme. That is the
+ *    contract — tokens, not a shared Tailwind config — and it is what lets one module
+ *    bundle look right in two shells built on two different component libraries. A
+ *    module that hard-coded a palette would be wrong the moment either shell changed
+ *    one.
+ *
+ * `@source` lives in the importing module, not here: it is relative to the file that
+ * declares it, and each module has to scan itself plus this folder. */
+
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.2);
+}

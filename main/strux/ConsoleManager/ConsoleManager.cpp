@@ -1,4 +1,5 @@
 #include "ConsoleManager.h"
+#include "UiManager.h"
 #include "CommandManager.h"
 #include "JsonWriter.h"
 #include "ReplyWriter.h"
@@ -74,6 +75,9 @@ void ConsoleManager::Init()
     // ConsoleManager initializes before CommandManager::Init() — fine by
     // design: the registry is usable from construction.
     strux_.getCommandManager().Register(this, commands_);
+    // UiManager initialises after this manager, which is fine: Register() only takes
+    // a mutex and links a chain, exactly like the command table above.
+    strux_.getUiManager().Register({ &uiModule_ });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized (capturing stdout)");
