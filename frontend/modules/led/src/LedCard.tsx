@@ -2,11 +2,20 @@ import type { ShellProvider } from "@shell/contract"
 import { describe, useLed } from "./led"
 import { Toggle } from "./Toggle"
 
-// The dashboard card. What used to be frontend/src/components/LedCard.tsx, now shipped
-// by the firmware that owns the LED rather than compiled into the shell — which is the
-// whole point of the exercise: the shell has no idea this device has an LED.
+// The LED, whole, as one home-screen card.
+//
+// This was two components — a small card and a fuller page behind its own sidebar
+// entry — and the page has gone. Everything it had is here: the control, the state
+// readout, and a manual refresh. A device whose one feature is an LED should open on
+// the LED, and a nav entry beside Home leading to the same two controls was a second
+// door into one room. A module with genuinely more to show than a card can hold still
+// declares a UiPage; this one never had that much.
+//
+// What used to be frontend/src/components/LedCard.tsx, now shipped by the firmware
+// that owns the LED rather than compiled into the shell — which is the whole point of
+// the exercise: the shell has no idea this device has an LED.
 export function LedCard({ shell }: { shell: ShellProvider }) {
-  const { state, busy, setEnabled } = useLed(shell.transport)
+  const { state, busy, error, setEnabled, refresh } = useLed(shell.transport)
 
   return (
     <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
@@ -20,6 +29,7 @@ export function LedCard({ shell }: { shell: ShellProvider }) {
           <p className="text-sm font-medium">{describe(state)}</p>
           <p className="text-sm text-muted-foreground">
             The board LED is lit while the device is connected to its relay server.
+            Turn the indication off to leave it dark regardless of the link.
           </p>
         </div>
         <Toggle
@@ -31,6 +41,36 @@ export function LedCard({ shell }: { shell: ShellProvider }) {
           label="Show the relay link on the onboard LED"
         />
       </div>
+
+      <dl className="mt-6 grid grid-cols-2 gap-x-8 gap-y-3 border-t pt-4 text-sm">
+        <Row label="Indication" value={state ? (state.enabled ? "On" : "Off") : "…"} />
+        <Row label="Relay link" value={state ? (state.connected ? "Connected" : "Down") : "…"} />
+        <Row label="LED" value={state ? (state.on ? "Lit" : "Dark") : "…"} />
+        <Row label="Device" value={shell.device.name} />
+      </dl>
+
+      {error && (
+        <p className="mt-4 text-sm text-destructive">
+          Last poll failed: {error}. Showing the last known state.
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={refresh}
+        className="mt-4 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+      >
+        Refresh now
+      </button>
+    </div>
+  )
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-mono">{value}</dd>
     </div>
   )
 }

@@ -9,13 +9,15 @@ Last updated 2026-09-09.
 
 ## Now
 
-**Device-hosted UI modules, steps 1-4 done** on `ui-modules`: the auth fix, `UiManager`
-and `ui modules`, the shell contract and seam, and `ModuleHost` with the LED shipping as
-the first real module. The device frontend now learns its feature UI from the firmware —
-there is no string "led" left in `frontend/src`. Steps 5 and 6 are the relay's half:
-`DeviceCommand` on the hub, the cache warmer asking `ui modules` instead of scraping, and
-the relay shell consuming the same bundles.
-→ [`backlog/2026-09-08-device-hosted-ui-modules.md`](backlog/2026-09-08-device-hosted-ui-modules.md)
+**Device-hosted UI modules are done**, both halves — the device shell on `ui-modules`
+in this repo, the relay's on `ui-modules` in
+[strux-relay](https://github.com/vanBassum/strux-relay). Firmware declares its UI with
+`ui modules` and ships the bundle that draws it; both shells compose the same bundle over
+different transports; a home screen is contributed cards and nothing else. **Both
+branches need merging, and neither has been used by anyone but me** — a second board on
+older firmware is the mixed-fleet case still worth exercising on the bench.
+→ [`reasoning/…the-manifest-is-a-command…`](reasoning/2026-09-09-21h50-the-manifest-is-a-command-so-a-shell-can-be-complete-before-any-module-loads.md),
+[`…a-home-screen-is-the-product…`](reasoning/2026-09-09-22h00-a-home-screen-is-the-product-not-a-readout-of-the-board.md)
 
 **Putting the relay in production** — live at `https://strux.vanbassum.com`, behind
 Traefik and Authentik. A device must be approved and must present its own token, or the

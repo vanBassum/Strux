@@ -140,8 +140,22 @@ it talks to — module and firmware come out of the same `www` build.
   static files to a LAN browser.
 - **The app registers its UI** the same way it registers commands and settings: a
   `UiModule` handed to `UiManager::Register()` from the manager's own `Init()`.
-  `LedManager`'s `uiPages_` / `uiCards_` are the ids, and they must match what the
-  bundle registers.
+  `LedManager`'s `uiCards_` holds the ids, and they must match what the bundle
+  registers — a registration the manifest does not declare is ignored with a warning,
+  because honouring it would make navigation depend on running module code.
+- **Cards first; a page only when a card cannot hold it.** A shell's home screen *is*
+  the product: it renders contributed cards and nothing of its own. So a feature that
+  is what the device is for declares a **card**, not a page — a sidebar entry beside
+  Home leading to the same controls is a second door into one room. `UiPage` is still
+  there, for a module with genuinely more to show. The LED demo declares one card and
+  no page, and the relay shell does the same thing under a device's *Overview*.
+  Consequence worth knowing: a device that contributes nothing has an empty home
+  screen, which is the template's honest default rather than a bug.
+- **The shell's own readout is not on the home screen.** Chip, heap, IP and compile
+  time live in a dialog behind the sidebar footer
+  ([DeviceInfoDialog](frontend/src/components/DeviceInfoDialog.tsx)) — read once when
+  something is wrong, never while using the device, so leading with them pushed the
+  actual feature below the fold on every product built from this template.
 - **The contract is one file with no imports** ([frontend/shell-contract/contract.ts](frontend/shell-contract/contract.ts)),
   because it gets vendored into the relay. It describes nothing below `request`: a
   module never opens a socket and never imports the shell's backend singleton.
@@ -170,6 +184,15 @@ it talks to — module and firmware come out of the same `www` build.
   command, and a refusal means "no modules" rather than an error; a `hostApi` outside
   the shell's range omits navigation and says so, leaving Settings, Console and Firmware
   fully usable.
+- **The relay composes the same bundles**
+  ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)). It reads the
+  manifest with a hub call of its own rather than a generic command, because only the
+  relay can tell a device that *refused* `ui modules` from one that went silent — the
+  first is the mixed-fleet case, the second is a fault. A module's `request` becomes
+  `DeviceCommand` on the hub, over the pipe the device already dialled; the contract is
+  vendored there byte-identical with a lock file, and its build fails if the copy drifts.
+  Its module registry is **per device**, because two boards can declare the same page id
+  drawn by different bundles.
 
 ### Deliberately out of scope
 

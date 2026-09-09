@@ -52,6 +52,18 @@ public:
     UiModule(const char* id, const char* entry, const UiPage (&pages)[P])
         : id(id), entry(entry), pages(pages), pageCount(P) {}
 
+    /// Cards only, no page of its own — which is the ordinary case for a product's
+    /// main feature, not a lesser one. A feature that IS what the device is for
+    /// belongs on the home screen, and a nav entry beside Home leading to the same
+    /// controls is a second door into one room. Pages are for a module with more to
+    /// show than a card can hold.
+    ///
+    /// Unambiguous against the overload above because a UiPage array and a
+    /// const char* array are different types.
+    template <size_t C>
+    UiModule(const char* id, const char* entry, const char* const (&cards)[C])
+        : id(id), entry(entry), cards(cards), cardCount(C) {}
+
     const char*        id;
     const char*        entry;
     const UiPage*      pages     = nullptr;

@@ -84,11 +84,16 @@ private:
 
     // ── UI. The frontend half of this feature is a self-contained ES module in www,
     // which a shell imports on demand. What follows is only the *declaration* a shell
-    // reads first, so it can draw a sidebar entry without loading any module code —
-    // and the ids are what the module's own activate() is matched against.
-    inline static const UiPage       uiPages_[] = { { "led", "LED", "lightbulb" } };
-    inline static const char* const  uiCards_[] = { "led" };
-    inline static UiModule uiModule_{ "led", "/modules/led.js", uiPages_, uiCards_ };
+    // reads first, so it can compose a home screen without loading any module code —
+    // and the id is what the module's own activate() is matched against.
+    //
+    // A CARD and no page, deliberately. This is the one thing the demo device does, so
+    // it belongs on the home screen rather than behind a sidebar entry next to it — a
+    // shell's home is the product, and a page leading to the same two controls would
+    // be a second door into one room. `UiPage` is still there for a module with more
+    // to show than a card can hold; this one has not.
+    inline static const char* const uiCards_[] = { "led" };
+    inline static UiModule uiModule_{ "led", "/modules/led.js", uiCards_ };
 
     // ── Commands ──
     RequestError Cmd_Get(CommandContext& ctx);

@@ -9,7 +9,6 @@
 import css from "./index.css?inline"
 import type { ActivateFn } from "@shell/contract"
 import { LedCard } from "./LedCard"
-import { LedPage } from "./LedPage"
 
 const STYLE_ID = "strux-module-led"
 
@@ -30,16 +29,15 @@ function adoptStyles() {
 export const activate: ActivateFn = (shell) => {
   adoptStyles()
 
-  // The ids must match what the firmware declared in `ui modules`. The shell checks
-  // that and ignores anything undeclared — registering a page the manifest does not
+  // A CARD and no page: the LED is what this device does, so it belongs on the home
+  // screen rather than behind a nav entry beside it.
+  //
+  // The id must match what the firmware declared in `ui modules`. The shell checks
+  // that and IGNORES anything undeclared — registering a page the manifest does not
   // name would make navigation depend on running module code, which is the property
-  // the manifest exists to protect. See UiManager's uiPages_/uiCards_ in
-  // main/app/LedManager/LedManager.h: they are the same two strings.
-  shell.routes.register({
-    id: "led",
-    render: () => <LedPage shell={shell} />,
-  })
-
+  // the manifest exists to protect. So `shell.routes.register` here would be silently
+  // dropped with a warning, not honoured. See uiCards_ in
+  // main/app/LedManager/LedManager.h: it is the same string.
   shell.cards.register({
     id: "led",
     render: () => <LedCard shell={shell} />,

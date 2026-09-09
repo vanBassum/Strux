@@ -15,6 +15,7 @@ import { useDeviceInfo } from "@/hooks/use-device-info"
 import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
+import { DeviceInfoDialog } from "@/components/DeviceInfoDialog"
 import { shellPages, sameRoute, type Route } from "@/shell/registry"
 import { useManifest } from "@/shell/ModuleHost"
 import { declaredPages } from "@/shell/module-registry"
@@ -108,25 +109,37 @@ export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      {/* The footer is the way in to the device's details. It already shows the
+          version and the link state, so it is where somebody looks when they want to
+          know more about either — which is why Device Info is behind it rather than
+          on the home screen or in a nav entry of its own. A button, not a div with an
+          onClick: keyboard focus and Enter come for free, and a dialog reached only
+          by mouse is a dialog some people cannot reach. */}
       <SidebarFooter className="p-3">
-        <div className="rounded-lg border bg-card p-3 text-xs">
-          {info && (
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-muted-foreground">Version</span>
+        <DeviceInfoDialog>
+          <button
+            type="button"
+            aria-label="Device info"
+            className="w-full cursor-pointer rounded-lg border bg-card p-3 text-left text-xs transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {info && (
+              <div className="mb-1.5 flex items-center justify-between">
+                <span className="text-muted-foreground">Version</span>
+                <div className="flex items-center gap-1.5">
+                  <PreReleaseBadge version={info.firmware} />
+                  <span className="font-mono">{info.firmware}</span>
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-muted-foreground">Status</span>
               <div className="flex items-center gap-1.5">
-                <PreReleaseBadge version={info.firmware} />
-                <span className="font-mono">{info.firmware}</span>
+                <span className={`h-2 w-2 rounded-full ${statusColor[connection]}`} />
+                <span>{statusLabel[connection]}</span>
               </div>
             </div>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">Status</span>
-            <div className="flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${statusColor[connection]}`} />
-              <span>{statusLabel[connection]}</span>
-            </div>
-          </div>
-        </div>
+          </button>
+        </DeviceInfoDialog>
       </SidebarFooter>
     </Sidebar>
   )

@@ -1,55 +1,49 @@
-import { useDeviceInfo } from "@/hooks/use-device-info"
-import { PreReleaseBadge } from "@/components/PreReleaseBadge"
-import { CpuIcon } from "lucide-react"
-import { useModuleCards } from "@/shell/ModuleHost"
 import type { ReactNode } from "react"
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  return `${(bytes / 1024).toFixed(1)} KB`
-}
+import { useModuleCards } from "@/shell/ModuleHost"
+import { useManifest } from "@/shell/ModuleHost"
 
+/**
+ * The home screen, and it is the PRODUCT — nothing else.
+ *
+ * Every card here is contributed by firmware. The shell ships none of its own, and
+ * that is the point rather than an omission: this file is in a template, so anything
+ * it drew would appear on every product built from it whether or not that product
+ * wanted it. What the device does is what the device says it does.
+ *
+ * It used to open with a Device Info card. That moved behind the sidebar's footer
+ * (see DeviceInfoDialog): a chip name and a heap figure are read once when something
+ * is wrong, and leading with them pushed the actual feature below the fold.
+ *
+ * On a device with no modules this page is empty, and it says so plainly instead of
+ * inventing something to show. That is the template's own default state — a fresh
+ * Strux fork has no features yet — and an honest blank is a better prompt than a
+ * card of numbers.
+ */
 export default function HomePage() {
-  const info = useDeviceInfo()
-  // The card slot. Every card here is contributed by firmware — the shell ships none
-  // of its own beyond Device Info, so this list is empty on a device with no modules
-  // and that is the template's ordinary state.
   const cards = useModuleCards()
+  const { status } = useManifest()
+
+  if (cards.length === 0)
+    return (
+      <div className="mx-auto max-w-2xl">
+        <div className="rounded-xl border border-dashed p-8 text-center">
+          <h1 className="mb-2 text-lg font-semibold">Nothing on the home screen yet</h1>
+          <p className="mx-auto max-w-md text-sm text-muted-foreground">
+            {status === "loading"
+              ? "Asking the device what it can show…"
+              : status === "unsupported"
+                ? "This device's UI needs a newer page than this one."
+                : "This firmware contributes no home-screen cards. A manager registers " +
+                  "a UiModule to put its feature here — see LedManager for the worked " +
+                  "example. Settings, Console and Firmware work regardless."}
+          </p>
+        </div>
+      </div>
+    )
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-
-      <div className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
-        <div className="mb-4 flex items-center gap-2">
-          <CpuIcon className="size-5 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">Device Info</h2>
-        </div>
-
-        {!info ? (
-          <p className="text-sm text-muted-foreground">Connecting...</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
-            <Row label="Project" value={info.project} />
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Firmware</span>
-              <span className="flex items-center gap-2 font-mono">
-                {info.firmware}
-                <PreReleaseBadge version={info.firmware} />
-              </span>
-            </div>
-            <Row label="ESP-IDF" value={info.idf} />
-            <Row label="Compiled" value={`${info.date} ${info.time}`} />
-            <Row label="Chip" value={info.chip} />
-            <Row label="CPU" value={info.cpu} />
-            <Row label="IP address" value={info.ip || "No address"} />
-            <Row label="Free heap" value={formatBytes(info.heapFree)} />
-            <Row label="Min free heap" value={formatBytes(info.heapMin)} />
-            <Row label="Device time" value={info.deviceTime} />
-          </div>
-        )}
-      </div>
-
       {cards.map((card) => (
         <div key={`${card.moduleId}/${card.id}`}>
           {card.render ? (
@@ -62,15 +56,6 @@ export default function HomePage() {
           ) : null}
         </div>
       ))}
-    </div>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono">{value}</span>
     </div>
   )
 }
