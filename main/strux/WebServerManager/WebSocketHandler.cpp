@@ -96,7 +96,11 @@ void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int le
     {
         if (httpd_ws_send_frame_async(server, clients[i], &frame) != ESP_OK)
         {
-            ESP_LOGW(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
+            // DEBUG, not WARN. A browser that closes a tab or reloads takes its
+            // socket with it without a close frame, so the next broadcast to that
+            // fd fails — every page close produced two scary lines about a device
+            // that was working perfectly. Removing the client IS the handling.
+            ESP_LOGD(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
             registry_.remove(clients[i]);
         }
     }
@@ -167,7 +171,9 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, sizeof(buf) - 1);
     if (ret != ESP_OK)
     {
-        ESP_LOGW(TAG, "WS recv failed: %s", esp_err_to_name(ret));
+        // Also DEBUG: the common cause is the peer vanishing, which is not this
+        // device's problem and not something a reader can act on.
+        ESP_LOGD(TAG, "WS recv failed: %s", esp_err_to_name(ret));
         self->RemoveWsClient(httpd_req_to_sockfd(req));
         return ret;
     }

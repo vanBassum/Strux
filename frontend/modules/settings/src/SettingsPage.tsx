@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { DeviceTransport, ShellProvider } from "@shell/contract"
+import {
+  BracesIcon,
+  LockIcon,
+  PowerIcon,
+  SaveIcon,
+  SearchIcon,
+  Undo2Icon,
+} from "lucide-react"
 import { Button, Input, Modal, Panel, Switch } from "../../_ui"
 import { errorMessage } from "../../_ui/activate"
 
@@ -177,155 +185,199 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
     )
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground text-sm">
-            Whatever this firmware declares — the page is generated from{" "}
-            <code>settings list</code>.
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setJsonText(
-                JSON.stringify(
-                  Object.fromEntries(
-                    (entries ?? []).map((e) => [e.key, e.key in edits ? edits[e.key] : e.value]),
+    // Two columns from `lg` up: the settings themselves, and the section rail the
+    // shell-page version had. `items-start` so the rail can stick rather than
+    // stretch, and the whole thing collapses to one column below `lg`, where the
+    // rail would cost more width than it earns.
+    <div className="mx-auto flex max-w-6xl items-start gap-8">
+      <div className="min-w-0 flex-1 space-y-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Settings</h1>
+            <p className="text-muted-foreground text-sm">
+              Whatever this firmware declares — the page is generated from{" "}
+              <code>settings list</code>.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setJsonText(
+                  JSON.stringify(
+                    Object.fromEntries(
+                      (entries ?? []).map((e) => [e.key, e.key in edits ? edits[e.key] : e.value]),
+                    ),
+                    null,
+                    2,
                   ),
-                  null,
-                  2,
-                ),
-              )
-              setJsonError("")
-              setJsonOpen(true)
-            }}
-          >
-            Edit as JSON
-          </Button>
-          <Button variant="outline" onClick={() => setRebootOpen(true)}>
-            Reboot
-          </Button>
-          <Button
-            variant="outline"
-            disabled={dirty.length === 0 || saving}
-            onClick={() => setEdits({})}
-          >
-            Revert
-          </Button>
-          <Button disabled={dirty.length === 0 || saving} onClick={() => void save()}>
-            {saving ? "Saving…" : dirty.length > 0 ? `Save ${dirty.length}` : "Save"}
-          </Button>
+                )
+                setJsonError("")
+                setJsonOpen(true)
+              }}
+            >
+              <BracesIcon />
+              Edit as JSON
+            </Button>
+            <Button variant="outline" onClick={() => setRebootOpen(true)}>
+              <PowerIcon />
+              Reboot
+            </Button>
+            <Button
+              variant="outline"
+              disabled={dirty.length === 0 || saving}
+              onClick={() => setEdits({})}
+            >
+              <Undo2Icon />
+              Revert
+            </Button>
+            <Button disabled={dirty.length === 0 || saving} onClick={() => void save()}>
+              <SaveIcon />
+              {saving ? "Saving…" : dirty.length > 0 ? `Save ${dirty.length}` : "Save"}
+            </Button>
+          </div>
         </div>
+
+        <div className="relative">
+          <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
+          <Input
+            className="pl-8"
+            placeholder="Filter settings…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </div>
+
+        {!entries ? (
+          <Panel>Reading the device…</Panel>
+        ) : groups.length === 0 ? (
+          <Panel>Nothing matches “{search}”.</Panel>
+        ) : (
+          groups.map((group) => (
+            <Panel
+              key={group.prefix}
+              id={`settings-${group.prefix}`}
+              title={group.label}
+              className="scroll-mt-2"
+            >
+              <div className="space-y-3">
+                {group.items.map((entry) => {
+                  const current = entry.key in edits ? edits[entry.key] : entry.value
+                  const changed = entry.key in edits
+                  const secret = isSecret(entry.key)
+
+                  return (
+                    <div key={entry.key} className="flex items-center justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 text-sm">
+                          {secret && <LockIcon className="text-muted-foreground size-3.5 shrink-0" />}
+                          <span className={changed ? "font-medium" : undefined}>
+                            {entry.label || entry.key}
+                          </span>
+                        </div>
+                        <div className="text-muted-foreground font-mono text-xs">
+                          {entry.key}
+                        </div>
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-2">
+                        {entry.key === "wifi.ssid" && (
+                          <Button variant="ghost" size="sm" onClick={() => setWifiOpen(true)}>
+                            Scan
+                          </Button>
+                        )}
+                        {entry.type === "bool" ? (
+                          <Switch
+                            checked={current === true || current === 1 || current === "1"}
+                            onChange={(next) => setEdits((e) => ({ ...e, [entry.key]: next }))}
+                            label={entry.label || entry.key}
+                          />
+                        ) : (
+                          <Input
+                            className="w-56"
+                            inputMode={NUMERIC.has(entry.type) ? "numeric" : undefined}
+                            // Masked until focused, per field rather than page-wide:
+                            // revealing every secret to see one is what masking was for.
+                            type={secret && !revealed[entry.key] ? "password" : "text"}
+                            value={String(current ?? "")}
+                            onFocus={() =>
+                              secret && setRevealed((r) => ({ ...r, [entry.key]: true }))
+                            }
+                            onChange={(event) =>
+                              setEdits((e) => ({ ...e, [entry.key]: event.target.value }))
+                            }
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </Panel>
+          ))
+        )}
+
+        <Modal
+          open={jsonOpen}
+          onClose={() => setJsonOpen(false)}
+          title="Edit as JSON"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setJsonOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={() => void applyJson()}>Apply</Button>
+            </>
+          }
+        >
+          <p className="text-muted-foreground mb-2">
+            Applied as pending edits, not written — Save still has to be pressed.
+          </p>
+          <textarea
+            className="border-input bg-background h-64 w-full rounded-md border p-2 font-mono text-xs"
+            spellCheck={false}
+            value={jsonText}
+            onChange={(event) => setJsonText(event.target.value)}
+          />
+          {jsonError && <p className="text-destructive mt-2">{jsonError}</p>}
+        </Modal>
+
+        <RebootModal open={rebootOpen} onClose={() => setRebootOpen(false)} shell={shell} />
+        <WifiModal
+          open={wifiOpen}
+          onClose={() => setWifiOpen(false)}
+          shell={shell}
+          onPick={(ssid) => {
+            setEdits((e) => ({ ...e, "wifi.ssid": ssid }))
+            setWifiOpen(false)
+          }}
+        />
       </div>
 
-      <Input
-        placeholder="Filter settings…"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-      />
-
-      {!entries ? (
-        <Panel>Reading the device…</Panel>
-      ) : groups.length === 0 ? (
-        <Panel>Nothing matches “{search}”.</Panel>
-      ) : (
-        groups.map((group) => (
-          <Panel key={group.prefix} title={group.label}>
-            <div className="space-y-3">
-              {group.items.map((entry) => {
-                const current = entry.key in edits ? edits[entry.key] : entry.value
-                const changed = entry.key in edits
-                const secret = isSecret(entry.key)
-
-                return (
-                  <div key={entry.key} className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 text-sm">
-                        {secret && <LockGlyph />}
-                        <span className={changed ? "font-medium" : undefined}>
-                          {entry.label || entry.key}
-                        </span>
-                      </div>
-                      <div className="text-muted-foreground font-mono text-xs">
-                        {entry.key}
-                      </div>
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-2">
-                      {entry.key === "wifi.ssid" && (
-                        <Button variant="ghost" size="sm" onClick={() => setWifiOpen(true)}>
-                          Scan
-                        </Button>
-                      )}
-                      {entry.type === "bool" ? (
-                        <Switch
-                          checked={current === true || current === 1 || current === "1"}
-                          onChange={(next) => setEdits((e) => ({ ...e, [entry.key]: next }))}
-                          label={entry.label || entry.key}
-                        />
-                      ) : (
-                        <Input
-                          className="w-56"
-                          inputMode={NUMERIC.has(entry.type) ? "numeric" : undefined}
-                          // Masked until focused, per field rather than page-wide:
-                          // revealing every secret to see one is what masking was for.
-                          type={secret && !revealed[entry.key] ? "password" : "text"}
-                          value={String(current ?? "")}
-                          onFocus={() =>
-                            secret && setRevealed((r) => ({ ...r, [entry.key]: true }))
-                          }
-                          onChange={(event) =>
-                            setEdits((e) => ({ ...e, [entry.key]: event.target.value }))
-                          }
-                        />
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </Panel>
-        ))
-      )}
-
-      <Modal
-        open={jsonOpen}
-        onClose={() => setJsonOpen(false)}
-        title="Edit as JSON"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setJsonOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => void applyJson()}>Apply</Button>
-          </>
-        }
-      >
-        <p className="text-muted-foreground mb-2">
-          Applied as pending edits, not written — Save still has to be pressed.
+      {/* Sections, in the order they are rendered. Built from the same `groups`
+          the page renders, so it cannot list a section that is not there — and it
+          follows the filter, which is why it is not a static list of prefixes. */}
+      <aside className="sticky top-0 hidden w-48 shrink-0 lg:block">
+        <p className="text-muted-foreground mb-2 px-2 text-xs font-medium tracking-wide uppercase">
+          On this page
         </p>
-        <textarea
-          className="border-input bg-background h-64 w-full rounded-md border p-2 font-mono text-xs"
-          spellCheck={false}
-          value={jsonText}
-          onChange={(event) => setJsonText(event.target.value)}
-        />
-        {jsonError && <p className="text-destructive mt-2">{jsonError}</p>}
-      </Modal>
-
-      <RebootModal open={rebootOpen} onClose={() => setRebootOpen(false)} shell={shell} />
-      <WifiModal
-        open={wifiOpen}
-        onClose={() => setWifiOpen(false)}
-        shell={shell}
-        onPick={(ssid) => {
-          setEdits((e) => ({ ...e, "wifi.ssid": ssid }))
-          setWifiOpen(false)
-        }}
-      />
+        <nav className="space-y-0.5">
+          {groups.map((group) => (
+            <button
+              key={group.prefix}
+              type="button"
+              className="text-muted-foreground hover:bg-muted hover:text-foreground block w-full truncate rounded-md px-2 py-1 text-left text-sm"
+              onClick={() =>
+                document
+                  .getElementById(`settings-${group.prefix}`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
+              {group.label}
+            </button>
+          ))}
+        </nav>
+      </aside>
     </div>
   )
 }
@@ -454,19 +506,3 @@ function WifiModal({
   )
 }
 
-/// Drawn rather than imported, so the bundle carries no icon library.
-function LockGlyph() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      className="text-muted-foreground size-3.5 shrink-0"
-      aria-hidden="true"
-    >
-      <rect x="3" y="11" width="18" height="11" rx="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-  )
-}

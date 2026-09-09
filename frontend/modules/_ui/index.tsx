@@ -45,15 +45,16 @@ const BUTTON_VARIANT: Record<ButtonVariant, string> = {
   // background: the right box with no visible control, on Refresh, Upload, Download,
   // Revert, Reboot, Scan and Clear alike. One colour utility per button, no tie, no
   // dependence on emission order.
-  default: "border-transparent bg-primary text-primary-foreground hover:opacity-90",
-  outline: "border-border bg-background hover:bg-muted",
-  ghost: "border-transparent bg-transparent hover:bg-muted",
-  destructive: "border-transparent bg-destructive text-white hover:opacity-90",
+  default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+  outline: "border-border bg-background hover:bg-muted hover:text-foreground",
+  ghost: "border-transparent bg-transparent hover:bg-muted hover:text-foreground",
+  destructive:
+    "border-transparent bg-destructive/10 text-destructive hover:bg-destructive/20",
 }
 
 const BUTTON_SIZE: Record<ButtonSize, string> = {
-  sm: "h-7 gap-1 px-2.5 text-xs",
-  default: "h-8 gap-1.5 px-3 text-sm",
+  sm: "h-7 gap-1 px-2.5 text-[0.8rem] [&_svg]:size-3.5",
+  default: "h-8 gap-1.5 px-2.5 text-sm",
   icon: "size-8",
 }
 
@@ -70,8 +71,9 @@ export function Button({
     <button
       type="button"
       className={cx(
-        "inline-flex shrink-0 items-center justify-center rounded-md border font-medium whitespace-nowrap transition-colors",
-        "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
+        "inline-flex shrink-0 items-center justify-center rounded-lg border font-medium whitespace-nowrap transition-all outline-none select-none",
+        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3",
+        "active:translate-y-px",
         "disabled:pointer-events-none disabled:opacity-50",
         "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         BUTTON_VARIANT[variant],
@@ -92,9 +94,10 @@ export function Input({
   return (
     <input
       className={cx(
-        "border-input bg-background h-8 w-full rounded-md border px-2.5 text-sm",
-        "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
-        "disabled:cursor-not-allowed disabled:opacity-50",
+        "border-input h-8 w-full min-w-0 rounded-lg border bg-transparent px-2.5 py-1 text-sm transition-colors outline-none",
+        "placeholder:text-muted-foreground",
+        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-3",
+        "disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
@@ -120,7 +123,8 @@ export function Switch({
   return (
     <label
       className={cx(
-        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent transition-colors",
+        "relative inline-flex h-[18.4px] w-8 shrink-0 items-center rounded-full border border-transparent transition-all",
+        "has-focus-visible:border-ring has-focus-visible:ring-ring/50 has-focus-visible:ring-3",
         checked ? "bg-primary" : "bg-input",
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
       )}
@@ -136,8 +140,8 @@ export function Switch({
       <span
         aria-hidden="true"
         className={cx(
-          "peer-focus-visible:ring-ring pointer-events-none block size-5 rounded-full bg-white shadow-sm transition-transform peer-focus-visible:ring-2",
-          checked ? "translate-x-5" : "translate-x-0.5",
+          "bg-background pointer-events-none block size-4 rounded-full ring-0 transition-transform",
+          checked ? "translate-x-[calc(100%-2px)]" : "translate-x-0",
         )}
       />
     </label>
@@ -147,11 +151,14 @@ export function Switch({
 // ── Panel ────────────────────────────────────────────────────────────────────
 
 export function Panel({
+  id,
   title,
   actions,
   className,
   children,
 }: {
+  /** So a page can give a section a scroll target without wrapping it in a div. */
+  id?: string
   title?: ReactNode
   actions?: ReactNode
   className?: string
@@ -159,8 +166,9 @@ export function Panel({
 }) {
   return (
     <div
+      id={id}
       className={cx(
-        "bg-card text-card-foreground rounded-xl border border-border p-4 shadow-sm",
+        "bg-card text-card-foreground ring-foreground/10 rounded-xl p-4 text-sm ring-1",
         className,
       )}
     >
@@ -226,7 +234,7 @@ export function Modal({
         onClose()
       }}
       onClose={onClose}
-      className="bg-card text-card-foreground m-auto w-[min(28rem,92vw)] rounded-xl border border-border p-5 shadow-lg backdrop:bg-black/50"
+      className="bg-popover text-popover-foreground ring-foreground/10 m-auto w-[min(28rem,92vw)] rounded-xl p-4 text-sm ring-1 backdrop:bg-black/50"
     >
       <h2 className="mb-2 text-base font-semibold">{title}</h2>
       <div className="text-sm">{children}</div>
