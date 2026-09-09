@@ -310,8 +310,10 @@ void RelayManager::OnConnected()
     skipping_ = false;
     linkUp_ = true;
 
-    ESP_LOGI(TAG, "Connected as '%s'%s", deviceId_,
-             conn_.authed ? " (no device password set — pipe is open)" : "");
+    // Says WHY the pipe is open, which is no longer "nobody set a password": this
+    // interface authenticates by its own dial-out, so web.password never gated it.
+    ESP_LOGI(TAG, "Connected as '%s' (relay interface — authenticated by dialling out)",
+             deviceId_);
 }
 
 int RelayManager::ReportConnectFailure(RelaySocket::ConnectResult result)
