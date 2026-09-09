@@ -194,6 +194,11 @@ device command at all.
   and the sidebar vanished in both shells. Going first makes the module lose every tie,
   which is the intended relationship. Dropping preflight only stops a module restyling
   the host's *elements*; it says nothing about a utility class they share.
+  **The catch, and it bites:** a module must not write `hidden md:block`. The shell's
+  plain `.hidden` now outranks the module's `.md:block`, so such an element is hidden at
+  every width — which is how the settings rail disappeared while sitting in the DOM.
+  Use the single-utility form (`max-md:hidden`), which carries its own media query and
+  so has no base utility to be overridden.
 - **Adding a module:** a folder under `frontend/modules/<id>/` whose `vite.config.ts`
   is one call to `moduleConfig(import.meta.dirname, "<id>")`, a line in
   `frontend/package.json`'s `build:modules` and `typecheck`, and a `UiModule`

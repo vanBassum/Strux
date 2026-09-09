@@ -367,7 +367,12 @@ export function SettingsPage({ shell }: { shell: ShellProvider }) {
       {/* Sections, in the order they are rendered. Built from the same `groups`
           the page renders, so it cannot list a section that is not there — and it
           follows the filter, which is why it is not a static list of prefixes. */}
-      <aside className="sticky top-0 hidden w-48 shrink-0 lg:block">
+      {/* `max-lg:hidden`, NOT `hidden lg:block`. A module's stylesheet is adopted
+          ahead of the shell's so it loses every tie (see _ui/activate.ts), which
+          means the shell's plain `.hidden` outranks a module's `.lg:block` and an
+          element written that way is hidden at EVERY width. One utility carrying
+          its own media query has nothing to be overridden by. */}
+      <aside className="sticky top-0 w-48 shrink-0 max-lg:hidden">
         <p className="text-muted-foreground mb-3 px-3 text-xs font-semibold tracking-wider uppercase">
           On this page
         </p>
