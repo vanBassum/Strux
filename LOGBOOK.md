@@ -254,3 +254,27 @@ justified the setting with a real consequence of the wrong mechanism.
 
 ### 2026-09-09 20:55 — Final validation, steady state under full load
 No reboots, all managers, relay on, three concurrent loads.
+- UDP: **42/42 batches, 25 200 packets, 0.0 % loss.** `late` 5–18 per 600.
+- WebSocket commands: **830/830 OK**, worst 287 ms under full load.
+- `ui modules` **over the relay browser pipe** (the original failing symptom, which
+  used to succeed 1 in 3 with 8–12 s timeouts): **40/40 OK, 65–81 ms.**
+- Both boards build: `esp32c3_supermini` and `esp32_devkit`.
+
+### 2026-09-09 21:15 — Adversarial: connection-table flood, log storm under a lock
+300 socket attempts, 10 at a time against a 4-slot table. Every refusal logs from
+inside `ConnectionRegistry`'s `LOCK`, so this is the remaining shape of the defect —
+a log flood emitted under a mutex.
+
+`opened=204 refused=98 replied=181 rejected=0 timedOut=0`
+
+Refusals are correct for a 4-slot table, and **nothing hung**: no command was
+silently swallowed, which is what the slotless-socket refusal was for. UDP loss
+during the flood: **0.0 %**.
+
+### 2026-09-09 21:20 — Known residual, bounded and currently harmless
+`ConsoleManager::LogOutput` still calls `vprintf` synchronously, so the console is
+on a path every task takes. With the UART primary that is cheap — a 128-byte
+hardware FIFO that always drains — but a sustained log flood could still fill it and
+block ~87 µs per byte. Not observed in any test above. The structural answer is to
+queue in `LogOutput` and let the broadcast task do the writing; that is a real change
+and not worth making to fix a symptom nobody has.
