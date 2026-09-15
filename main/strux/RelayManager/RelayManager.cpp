@@ -303,8 +303,7 @@ void RelayManager::OnConnected()
     // This line used to read `!(auth_ && auth_->AuthRequired())`, which is the
     // WEB interface's policy. Setting web.password — a LAN concern — therefore
     // locked the relay out of `web read`, leaving the asset proxy unable to fetch
-    // even the login page that would have unlocked it, and turning `ui modules`
-    // into a refusal indistinguishable from old firmware.
+    // even the login page that would have unlocked it.
     conn_.authed = true;
 
     skipping_ = false;

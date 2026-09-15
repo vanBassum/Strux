@@ -4,7 +4,6 @@
 #include "InitState.h"
 #include "CommandEntry.h"
 #include "TypedSettings.h"
-#include "UiModule.h"
 #include "Timer.h"
 
 // ──────────────────────────────────────────────────────────────
@@ -20,9 +19,9 @@
 //   • the framework, for commands        — `led get` / `led set`, in `help list` and
 //                                          reachable over WebSocket and the relay alike
 //   • the framework, for telemetry       — a point when the indication is switched
-//   • the framework, for its own UI      — a page and a dashboard card, declared here
-//                                          and shipped as a module in www, loaded by
-//                                          whichever shell the operator is looking at
+//
+// Its browser half is the frontend's home page (frontend/src/pages/HomePage.tsx over
+// the use-led hook), which is ordinary SPA code and touches no firmware.
 //
 // Note what it does NOT do: nothing in Strux knows this class exists. It is not named in
 // StruxContext, not in StruxProvider, and not in main.cpp. It announces itself by
@@ -81,18 +80,6 @@ private:
     // Read on every tick rather than once at Init, so a change in the settings UI shows
     // on the board a quarter-second later instead of after a reboot.
     inline static BoolSetting enabled_{ "led.enabled", "LED Shows Relay Link", true };
-
-    // ── UI. The frontend half of this feature is a self-contained ES module in www,
-    // which a shell imports on demand. What follows is only the *declaration* a shell
-    // reads first, so it can compose a home screen without loading any module code —
-    // and the id is what the module's own activate() is matched against.
-    //
-    // Declared FIRST among this firmware's modules, which is how a device says which
-    // of its features is the product: a shell lands on the first page the manifest
-    // declares. The app's own managers Init() after the framework's, so this ends up
-    // ahead of console/settings/firmware in the chain.
-    inline static const UiPage uiPages_[] = { { "led", "LED", "lightbulb" } };
-    inline static UiModule uiModule_{ "led", "/modules/led.js", uiPages_ };
 
     // ── Commands ──
     RequestError Cmd_Get(CommandContext& ctx);

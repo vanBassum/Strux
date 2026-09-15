@@ -479,6 +479,16 @@ class BackendService {
     return this.send("system reboot")
   }
 
+  async getLed(): Promise<LedState> {
+    return this.send<LedState>("led get")
+  }
+
+  /** Turns the link indication on or off. Omitted fields are left alone by the
+   *  device, so `{}` is a no-op that still reports the current state. */
+  async setLed(params: { enabled?: boolean }): Promise<LedState> {
+    return this.send<LedState>("led set", params)
+  }
+
   /** Returns false on wrong password; throws on connection failure. On success
    *  stores the session key and marks the connection authenticated. */
   async login(password: string): Promise<boolean> {
@@ -495,13 +505,10 @@ class BackendService {
   /** One command whose REQUEST has a body: an envelope chunk (not FINAL), then
    *  `body` streamed on the same session in window-sized pieces, then one reply.
    *
-   *  The generic form of what `uploadPartition` does by hand. It exists because
-   *  `partition write` is not the only command shaped like this and, more to the
-   *  point, because a UI module needs to reach this shape through the shell contract
-   *  — and the contract cannot offer a method whose only implementation is
-   *  partition-specific. What is NOT here is the erase-write-activate sequence: that
-   *  is partition policy and belongs to whoever knows about partitions, which is the
-   *  firmware module, not this transport.
+   *  The generic form of what `uploadPartition` does by hand, kept generic because
+   *  `partition write` is not the only command shaped like this. What is NOT here is
+   *  the erase-write-activate sequence: that is partition policy and belongs to
+   *  whoever knows about partitions, which is the page above, not this transport.
    *
    *  Runs through the open queue, so nothing else touches the socket mid-upload — the
    *  device would REJECT an interleaved session id. */
@@ -756,6 +763,21 @@ export interface DeviceInfo {
   heapFree: number
   heapMin: number
   deviceTime: string
+}
+
+// ── The LED, this template's worked example ──────────────────────────────────
+//
+// A product built from Strux deletes this pair along with LedManager and puts its
+// own feature's commands here — the demo is the only thing in this file that is not
+// framework.
+
+export interface LedState {
+  /** Whether the LED is showing the relay link at all. */
+  enabled: boolean
+  /** The relay pipe's state — what the LED is indicating. */
+  connected: boolean
+  /** The pin, which is `enabled && connected`. */
+  on: boolean
 }
 
 export interface UpdateStatus {

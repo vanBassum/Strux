@@ -27,8 +27,12 @@ Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager i
 cd frontend
 pnpm dev          # hot-reload dev server, proxies WebSocket to a running device
 pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash as FAT image)
-pnpm typecheck    # tsc --noEmit
+pnpm typecheck    # tsc -b --force (plain `tsc --noEmit` checks NOTHING:
+                  # the root tsconfig has files: [])
 ```
+
+`pnpm dev` gives HMR for the whole UI — one bundle, one build, every page live — and
+proxies the WebSocket to the device named by `frontend/src/config.ts`'s `DEV_HOST`.
 
 There are no automated tests; verification is building, flashing, and driving the device over its own wire:
 
@@ -59,7 +63,7 @@ Every layer is the same pair: a **context** owning the layer's instances, and a 
 | Layer | Context (owns) | Provider (exposes) |
 |---|---|---|
 | `main/hardware/` — the **board** | `BoardContext` — driver instances, bus hosts | `BoardProvider` ([hardware/interfaces/BoardProvider.h](main/hardware/interfaces/BoardProvider.h)) — the roles a board owes |
-| `main/strux/` — the **framework** | `StruxContext` — the ten Strux managers | `StruxProvider` ([main/strux/StruxProvider.h](main/strux/StruxProvider.h)) |
+| `main/strux/` — the **framework** | `StruxContext` — the nine Strux managers | `StruxProvider` ([main/strux/StruxProvider.h](main/strux/StruxProvider.h)) |
 | `main/app/` — the **application** | `AppContext` — this product's managers | `AppProvider` ([main/app/AppProvider.h](main/app/AppProvider.h)) |
 
 [main.cpp](main/main.cpp) is four calls: `board.Init()`, `strux.Init()`, `application.Init()`, then the OTA validity mark. **The order *within* a layer lives in that layer's context**, not here — `StruxContext::Init()` carries Strux's ordering and its constraints (Relay after WebServer, whose `Authenticator` it shares; Telemetry after Relay, down whose pipe it leaves), so a fork pulling a new framework manager gets its position along with it.
@@ -79,7 +83,7 @@ Every manager, in either managed layer:
 - has copy/move deleted,
 - initializes in `Init()` guarded by an `InitState` (`lib/rtos/InitState.h`), not in the constructor.
 
-Adding a **framework** manager: create the class, add it to `StruxProvider`, `StruxContext` (member *and* the ordered `Init()`), and `STRUX_SOURCES` + `INCLUDE_DIRS_LIST` in [main/CMakeLists.txt](main/CMakeLists.txt). Adding an **application** manager: the same, against `AppProvider`, `AppContext` and `APP_SOURCES` — and nothing in `strux/` is touched. [main/app/LedManager/](main/app/LedManager/) is the worked example: it owns the board LED and uses it to say whether the device is connected to its relay server — lit while `RelayManager::IsConnected()`, dark otherwise, polled every 250 ms on a `Timer`. Along the way it registers a setting, two commands, a telemetry point **and a UI contribution** without a single edit to the framework — the link state needed no new accessor, because `IsConnected()` was already the framework's own answer. Its browser half is not in the shell at all: it ships as a UI module ([frontend/modules/led/](frontend/modules/led/), see *Device-hosted UI modules* below), so deleting the example when the product has real features means deleting one manager and one module folder and nothing else.
+Adding a **framework** manager: create the class, add it to `StruxProvider`, `StruxContext` (member *and* the ordered `Init()`), and `STRUX_SOURCES` + `INCLUDE_DIRS_LIST` in [main/CMakeLists.txt](main/CMakeLists.txt). Adding an **application** manager: the same, against `AppProvider`, `AppContext` and `APP_SOURCES` — and nothing in `strux/` is touched. [main/app/LedManager/](main/app/LedManager/) is the worked example: it owns the board LED and uses it to say whether the device is connected to its relay server — lit while `RelayManager::IsConnected()`, dark otherwise, polled every 250 ms on a `Timer`. Along the way it registers a setting, two commands and a telemetry point without a single edit to the framework — the link state needed no new accessor, because `IsConnected()` was already the framework's own answer. Its browser half is the frontend's home page ([frontend/src/pages/HomePage.tsx](frontend/src/pages/HomePage.tsx) over [use-led.ts](frontend/src/hooks/use-led.ts) and `getLed`/`setLed` in `backend.ts`), so deleting the example when the product has real features means deleting one manager, replacing the contents of one page, and changing the first line of `AppSidebar`'s nav.
 
 Note: the two source lists are separated so a fork does not fight the template over one file, but they are still *one* file and still one ESP-IDF component. Making `strux/` a real component is the step that would make syncing a pull rather than a merge; it has not been taken.
 
@@ -128,93 +132,56 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 
 **A key is at most 15 characters** — NVS's limit, asserted in `Register()` at *runtime*, so an over-long key compiles fine and then boot-loops the device on the assert. Nothing catches it earlier. `telemetry.enabled` (17) does not fit; `telem.enabled` does.
 
-### Device-hosted UI modules
+### The UI is one page, not modules
 
-**Neither shell contributes anything to a device's navigation.** Every page comes from
-the firmware's manifest, and the first page it declares is the landing page — so a
-device decides both what its UI is and which part of it is the front screen. A shell is
-the frame, the router, the transport and the theme. Nothing else.
+**The frontend is one ordinary SPA.** `frontend/src/pages/` behind `AppSidebar` and a
+hash router, shadcn components over radix-ui, lucide icons. `HomePage` is the product's
+own screen — the LED demo in this template — and `Console`, `Settings` and `Firmware`
+follow it. A shell reached through the relay serves this page whole, exactly as the
+device's own HTTP server does.
 
-That is not where this started. Console, Settings and Firmware were pages compiled into
-each shell, which meant two implementations of each and, worse, a shell that knew
-`settings list` and `partition status` by name. Both shells now know the name of no
-device command at all.
+That is not where this ended up first. For a few days a device declared its UI with a
+`ui modules` command and shipped an ES-module bundle per page, so that one relay shell
+could host many heterogeneous products without knowing the name of a single device
+command. The design was coherent and it worked end to end on the bench. It was removed
+on 2026-09-15 anyway, because of what it cost to *be* two halves:
 
-- **The manifest is a command, not a file.** `ui modules` ([UiManager](main/strux/UiManager/))
-  answers with `hostApi` plus the modules and their pages. Nothing about a module
-  travels over HTTP except the bundle itself, and device HTTP still serves only static
-  files to a LAN browser.
-- **The manager that owns the commands owns the page.** A `UiModule` handed to
-  `UiManager::Register()` from the manager's own `Init()`, exactly like a command table
-  or a setting: [ConsoleManager](main/strux/ConsoleManager/) declares `console`,
-  [SettingsManager](main/strux/SettingsManager/) `settings`,
-  [UpdateManager](main/strux/UpdateManager/) `firmware`, and the app's own
-  [LedManager](main/app/LedManager/) declares `led`. `UiManager::Register` only takes a
-  mutex and links a chain, so it may be called before `UiManager::Init()` — which the
-  framework managers do, since they initialise first.
-- **Declaration order is the landing page.** `UiManager` head-inserts, and the app's
-  managers initialise after the framework's, so a product's own page ends up first and
-  is what a shell opens. A device with no modules has no page, says so, and leaves
-  nothing else broken.
-- **Pages only.** There were briefly cards too, rendered into a shell-owned home
-  screen; they went when the shell stopped owning any page under a device, because
-  nothing was left to host them.
-- **The contract is one file with no imports** ([frontend/shell-contract/contract.ts](frontend/shell-contract/contract.ts)),
-  because it gets vendored into the relay. `HOST_API` is **2**. Beyond `request` it
-  offers `upload` (a command whose request has a body — a firmware image is not an
-  argument), `download` (the same in reverse), and `logs` (the device's session-0
-  broadcast, the one device-initiated stream there is). There is still no
-  `subscribe(topic)`: `logs` is named after the one thing it carries so it does not
-  become a framework with a single user.
-- **One React, via an import map.** A module builds `react` and `react/jsx-runtime` as
-  external; the shell publishes them at `assets/host-react.js` and
-  `assets/host-jsx-runtime.js` (see [frontend/src/shell/host-react.js](frontend/src/shell/host-react.js))
-  and names them in an import map in `index.html`. Two React copies is the one thing
-  that genuinely breaks — every hook throws — so `pnpm build` runs
-  `scripts/check-modules.mjs`, which fails the build if a module imports a bare
-  specifier the map does not declare or a name the facade does not export. That check
-  exists because the first version of the facade used `export * from "react"`, which
-  compiles, emits, ships, and silently exports nothing usable: React is CommonJS. In
-  dev the map's targets do not exist — they are build artefacts — so `vite.config.ts`
-  redirects them to source; without it the seam worked only in a build.
-- **A module ships its own primitives** ([frontend/modules/_ui/](frontend/modules/_ui/)).
-  It cannot use either shell's components: this shell is radix-ui and the relay's is
-  `@base-ui/react`, so importing either would run on exactly one of them. `_ui` is
-  plain elements over the shells' design tokens, compiled into each bundle.
-- **A module bundles its own CSS.** Imported as a string and adopted as a `<style>` on
-  `activate()`, because Vite injects no `<link>` for a chunk pulled in by `import()` —
-  the styles would simply never apply. It imports Tailwind's theme and utilities but
-  **not preflight** (a second reset would restyle the shell) and scopes `@source` to
-  itself and `_ui` — each module declares its own tree, because a glob in the shared
-  `module.css` reached the siblings and put every module's utilities in every bundle.
-  **The `<style>` goes FIRST in `<head>`, not last.** A shell and a module are both
-  Tailwind v4, so both emit `@layer utilities`, and same-named layers are one layer per
-  document; inside a layer, equal specificity is decided by document order. Appended, a
-  module's `.hidden` beat the sidebar's `md:block` — a media query has no specificity —
-  and the sidebar vanished in both shells. Going first makes the module lose every tie,
-  which is the intended relationship. Dropping preflight only stops a module restyling
-  the host's *elements*; it says nothing about a utility class they share.
-  **The catch, and it bites:** a module must not write `hidden md:block`. The shell's
-  plain `.hidden` now outranks the module's `.md:block`, so such an element is hidden at
-  every width — which is how the settings rail disappeared while sitting in the DOM.
-  Use the single-utility form (`max-md:hidden`), which carries its own media query and
-  so has no base utility to be overridden.
-- **Adding a module:** a folder under `frontend/modules/<id>/` whose `vite.config.ts`
-  is one call to `moduleConfig(import.meta.dirname, "<id>")`, a line in
-  `frontend/package.json`'s `build:modules` and `typecheck`, and a `UiModule`
-  registration in the manager that owns the feature.
-- **Mixed fleets are the normal case.** Firmware without `ui modules` refuses the
-  command, and a refusal means "no modules" rather than an error; a `hostApi` outside
-  the shell's range says so and leaves the rest working.
-- **The relay composes the same bundles**
-  ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)). It reads the
-  manifest with a hub method of its own rather than a generic command call, because
-  only the relay can tell a device that *refused* `ui modules` from one that went
-  silent — the first is the mixed-fleet case, the second is a fault. `request` becomes
-  a hub call; `upload` and `download` become HTTP routes, because a body is a body. The
-  contract is vendored there byte-identical with a lock file, and its build fails if
-  the copy drifts. Its module registry is **per device**, because two boards can
-  declare the same page id drawn by different bundles.
+- about 2,000 lines — `modules/_ui`'s hand-rolled primitives, `ModuleHost`, the module
+  registry, the shell contract, the import-map React facades, `check-modules.mjs` and
+  two dev middlewares — none of which drew anything a user sees;
+- a running repair bill: the shared Tailwind `utilities` layer (a module's `.hidden`
+  beat the sidebar's `md:block` and the sidebar vanished), two React copies, four
+  concurrent requests against a ten-socket lwIP budget, `export * from "react"`
+  emitting nothing usable. Five reasoning notes in two days have the *seam* as their
+  subject rather than a feature;
+- and a template-shaped cost on top: a fork that wanted its own page had to learn the
+  module build before it could draw anything.
+
+So the whole mechanism is gone, on both sides — `UiManager`, `UiModule`, the four
+`UiModule` declarations, `frontend/modules/`, `frontend/shell-contract/` and
+`frontend/src/shell/`. Not gated, not left compiled in with nothing registered:
+**deleted**, the same call as the MQTT/HA removal below, and for the same reason. Git
+has it at `f7e0501` if a fork ever genuinely hosts many products in one shell.
+
+What follows from one page, and is worth keeping in mind:
+
+- **A page knows device commands by name, and that is fine now.** `SettingsPage` calls
+  `settings list`, `FirmwarePage` calls `partition status`. The module design existed to
+  forbid exactly this; with one shell per product there is no second implementation for
+  it to drift from.
+- **Adding a page:** a file in `frontend/src/pages/`, an entry in `navItems` in
+  [AppSidebar.tsx](frontend/src/components/AppSidebar.tsx) (which also defines the
+  `Page` type), and a `case` in `App.tsx`'s `PageContent`. Three edits, all in the
+  frontend, none in firmware.
+- **Routing lives in the HASH** ([use-route.ts](frontend/src/hooks/use-route.ts)) and
+  assets are referenced relatively (`base: "./"`), so one build serves both the device
+  root and the relay's `/devices/<id>/` subpath with no per-device build. A path-based
+  router breaks that.
+- **The relay serves this shape too**
+  ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)). A device that
+  does not answer `ui modules` — which is now every Strux device — is one the relay
+  serves whole, through its asset proxy. That fallback is the relay's own and predates
+  this change.
 
 ### Deliberately out of scope
 

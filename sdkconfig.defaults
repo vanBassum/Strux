@@ -54,13 +54,15 @@ CONFIG_PM_DFS_INIT_AUTO=y
 # connections lose the race.
 #
 # That stayed invisible while a page load asked for two files. It stopped being
-# invisible when UI modules put an import map in index.html: four concurrent requests
-# plus the command WebSocket, and the browser silently lost the stylesheet, so the
-# device's own shell came up with no CSS at all. Nothing in the UI could say why —
-# the only evidence was `httpd_accept_conn: error in accept (23)` in the device log.
+# invisible when the UI briefly shipped as separate module bundles behind an import
+# map: four concurrent requests plus the command WebSocket, and the browser silently
+# lost the stylesheet, so the page came up with no CSS at all. Nothing in the UI could
+# say why — the only evidence was `httpd_accept_conn: error in accept (23)` in the
+# device log.
 #
-# 16 is the option's maximum. httpd's 7 + 3 leaves six for everything else, which is
-# headroom rather than a fit. The frontend also stopped asking for four files at once
-# (see frontend/vite.config.ts, modulePreload) — both halves of that were wrong, and a
-# fork that adds a second listener should read this before trusting the default again.
+# The frontend is one bundle again, so a page load is back to three requests and this
+# would no longer bite. The setting stays at 16 anyway — the option's maximum — because
+# the inequality was always too tight: httpd's 7 + 3 against a budget of 10 leaves
+# nothing for the relay's outbound socket, mDNS, SNTP or DHCP. A fork that adds a
+# second listener should read this before trusting the default again.
 CONFIG_LWIP_MAX_SOCKETS=16

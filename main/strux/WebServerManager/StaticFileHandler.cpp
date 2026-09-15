@@ -127,17 +127,16 @@ esp_err_t StaticFileHandler::Handle(httpd_req_t* req)
     //
     // This server sent no Cache-Control, no ETag and no Last-Modified, which does
     // not mean "do not cache" — it means the browser may guess, and Chrome guesses
-    // yes. Combined with the one URL shape here that is deliberately STABLE, that
-    // guess is wrong in the worst way: `/modules/<id>.js` carries no content hash
-    // because the FIRMWARE names it in `ui modules`, so a module updated by an OTA
-    // of the www partition kept being served from disk cache and the new UI simply
-    // did not appear. Nothing was broken and nothing said so.
+    // yes. That is wrong in the worst way for the URLs here whose names are
+    // deliberately STABLE: `/index.html` does not change when its contents do, so a
+    // www partition updated by OTA kept being served from disk cache and the new UI
+    // simply did not appear. Nothing was broken and nothing said so.
     //
     // Two rules, decided by whether the name identifies the bytes:
     //   /assets/<name>-<hash>.js  content-hashed by the build, so a change is a new
     //                             URL and the old one can be kept forever.
-    //   everything else           index.html and the module bundles, whose names are
-    //                             stable, so they must be revalidated every load.
+    //   everything else           index.html above all, whose name is stable, so it
+    //                             must be revalidated every load.
     //
     // `no-cache` rather than `no-store`: the browser may still keep the bytes, it
     // just may not use them without asking. There is nothing to revalidate WITH yet

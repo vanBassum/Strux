@@ -3,7 +3,6 @@
 #include "StruxProvider.h"
 #include "SettingsManager.h"
 #include "CommandManager.h"
-#include "UiManager.h"
 #include "RelayManager.h"
 #include "TelemetryManager.h"
 #include "esp_log.h"
@@ -27,7 +26,6 @@ void LedManager::Init()
     StruxProvider& strux = app_.getStrux();
     strux.getSettingsManager().Register({ &enabled_ });
     strux.getCommandManager().Register(this, commands_);
-    strux.getUiManager().Register({ &uiModule_ });
 
     timer_.SetHandler([this] { OnTick(); });
     timer_.Init("led", pdMS_TO_TICKS(POLL_MS));

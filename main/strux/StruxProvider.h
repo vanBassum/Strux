@@ -24,7 +24,6 @@ class SettingsManager;
 class SystemManager;
 class TelemetryManager;
 class TimeManager;
-class UiManager;
 class UpdateManager;
 class WebServerManager;
 
@@ -39,7 +38,6 @@ public:
     virtual SystemManager& getSystemManager() = 0;
     virtual TelemetryManager& getTelemetryManager() = 0;
     virtual TimeManager& getTimeManager() = 0;
-    virtual UiManager& getUiManager() = 0;
     virtual UpdateManager& getUpdateManager() = 0;
     virtual WebServerManager& getWebServerManager() = 0;
 };

@@ -1,4 +1,5 @@
 import { useEffect } from "react"
+import { LightbulbIcon, TerminalIcon, SettingsIcon, DownloadIcon } from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -16,18 +17,29 @@ import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { DeviceInfoDialog } from "@/components/DeviceInfoDialog"
-import { sameRoute, type MaybeRoute, type Route } from "@/shell/registry"
-import { useManifest } from "@/shell/ModuleHost"
-import { declaredPages } from "@/shell/module-registry"
-import { resolveIcon } from "@/shell/icons"
 
-// The sidebar renders navigation; it no longer *defines* it. `shellPages` and the
-// `Route` type moved to shell/registry so that firmware-contributed pages can join
-// the same list without a component owning the router's type.
+// The nav, and the first entry is the product. "home" is a fixed id rather than the
+// feature's name so that a fork replacing this template's demo feature replaces the
+// CONTENTS of HomePage.tsx and the title and icon on this line — a bookmark to "/"
+// still lands on whatever that product's own screen is. LED is what Strux ships as
+// its worked example; a real product's first entry is its own thing.
+//
+// There is no "Device" entry: a chip name and a heap figure are reference material
+// you go looking for, not a destination, so they live behind the footer instead of
+// taking a place in the navigation beside the product. See
+// docs/reasoning/2026-09-09-22h00.
+const navItems = [
+  { title: "LED", icon: LightbulbIcon, page: "home" as const },
+  { title: "Console", icon: TerminalIcon, page: "console" as const },
+  { title: "Settings", icon: SettingsIcon, page: "settings" as const },
+  { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },
+]
+
+export type Page = (typeof navItems)[number]["page"]
+
 interface AppSidebarProps {
-  /// Null while the manifest has not yet said what pages exist.
-  currentRoute: MaybeRoute
-  onNavigate: (route: Route) => void
+  currentPage: Page
+  onNavigate: (page: Page) => void
 }
 
 const statusColor = {
@@ -42,12 +54,8 @@ const statusLabel = {
   disconnected: "Offline",
 } as const
 
-export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
+export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
   const connection = useConnectionStatus()
-  // Drawn from the manifest, so the nav is complete before a single module bundle has
-  // been fetched. That is the property the manifest-as-command exists to protect.
-  const { status } = useManifest()
-  const modulePages = declaredPages()
   const info = useDeviceInfo()
   const release = useLatestRelease()
   const updateAvailable = info && release && isNewerVersion(info.firmware, release.version)
@@ -69,46 +77,29 @@ export function AppSidebar({ currentRoute, onNavigate }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {modulePages.map((page) => {
-                const Icon = resolveIcon(page.icon)
-                return (
-                  <SidebarMenuItem key={`${page.moduleId}/${page.id}`}>
-                    <SidebarMenuButton
-                      isActive={sameRoute(currentRoute, { kind: "module", id: page.id })}
-                      onClick={() => onNavigate({ kind: "module", id: page.id })}
-                    >
-                      <Icon />
-                      <span>{page.title}</span>
-                      {/* The update dot used to hang off a built-in Firmware page.
-                          There is no built-in page any more, so it hangs off whichever
-                          module declares the id "firmware" — which the framework's own
-                          firmware module does. A product that replaces it keeps the
-                          dot by keeping the id. */}
-                      {page.id === "firmware" && updateAvailable && (
-                        <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-
-              {status === "unsupported" && (
-                <SidebarMenuItem>
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                    This device's UI needs a newer page.
-                  </div>
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.page}>
+                  <SidebarMenuButton
+                    isActive={currentPage === item.page}
+                    onClick={() => onNavigate(item.page)}
+                  >
+                    <item.icon />
+                    <span>{item.title}</span>
+                    {item.page === "firmware" && updateAvailable && (
+                      <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
+                    )}
+                  </SidebarMenuButton>
                 </SidebarMenuItem>
-              )}
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
       {/* The footer is the way in to the device's details. It already shows the
           version and the link state, so it is where somebody looks when they want to
-          know more about either — which is why Device Info is behind it rather than
-          on the home screen or in a nav entry of its own. A button, not a div with an
-          onClick: keyboard focus and Enter come for free, and a dialog reached only
-          by mouse is a dialog some people cannot reach. */}
+          know more about either. A button, not a div with an onClick: keyboard focus
+          and Enter come for free, and a dialog reached only by mouse is a dialog some
+          people cannot reach. */}
       <SidebarFooter className="p-3">
         <DeviceInfoDialog>
           <button

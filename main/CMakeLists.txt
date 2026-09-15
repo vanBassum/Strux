@@ -32,7 +32,6 @@ set(STRUX_SOURCES
     "strux/SystemManager/SystemManager.cpp"
     "strux/ConsoleManager/ConsoleManager.cpp"
     "strux/TimeManager/TimeManager.cpp"
-    "strux/UiManager/UiManager.cpp"
 )
 
 # ── The application. This is the list a fork owns.
@@ -68,7 +67,6 @@ set(INCLUDE_DIRS_LIST
     "strux/SystemManager"
     "strux/ConsoleManager"
     "strux/TimeManager"
-    "strux/UiManager"
     "hardware"
     "app"
     "app/LedManager"
