@@ -32,4 +32,4 @@ currently exactly full — a log partition means shrinking something
 (www uses ~140 KB of 896 KB), and partition layout changes cost
 existing devices one factory reflash.
 
-Priority: behind the remote-access server.
+Priority: behind the relay server, which is in production now.

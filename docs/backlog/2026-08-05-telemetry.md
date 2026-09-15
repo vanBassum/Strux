@@ -4,7 +4,7 @@ A manager records a measurement, the relay puts it in InfluxDB. The chain works 
 end as of 2026-08-05 — an ESP32 point queries back out of Influx tagged by device — and
 this is what it still owes.
 
-Related: [the relay in production](2026-08-05-relay-in-production.md) ·
+Related: [the relay's own repository and issues](https://github.com/vanBassum/strux-relay) ·
 [why the relay never parses a payload](../reasoning/2026-08-05-13h55-owning-the-read-removes-the-buffer.md)
 
 ## How it works today

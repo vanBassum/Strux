@@ -29,13 +29,6 @@ Reprovision before using it to verify anything above.
 **Known gap:** an upload does not surface the device's own flash position, only the
 browser's upload progress.
 
-**Putting the relay in production** — live at `https://strux.vanbassum.com`, behind
-Traefik and Authentik. A device must be approved and must present its own token, or the
-upgrade is refused with a 403, and pairing is one click in the dashboard. Step 9 —
-secrets out of `settings list` — is the last one before the plan calls it
-production-ready.
-→ [`backlog/2026-08-05-relay-in-production.md`](backlog/2026-08-05-relay-in-production.md)
-
 **Telemetry works end to end** — a manager records a point, the relay writes it to
 InfluxDB, and it queries back tagged by device. No buffering yet: a point taken while
 the relay is down is dropped. That and the other open ends are listed in

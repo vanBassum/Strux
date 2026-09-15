@@ -8,7 +8,7 @@ Strux is a template/foundation for ESP32 firmware (ESP-IDF v6.0, C++, FreeRTOS) 
 
 ## Build commands
 
-Firmware (requires ESP-IDF v6.0+ environment):
+Firmware (requires ESP-IDF v6.0+ environment). **Two IDF installs, and the tools are not where the docs assume:** `C:\esp6.0\esp-idf` is the framework, while the toolchain is an ESP-IDF Installation Manager layout under `C:\Espressif	ools`, activated by dot-sourcing `C:\Espressif	ools\Microsoft.v6.0.PowerShell_profile.ps1` — `export.ps1`/`export.sh` both fail, because they look for a python env that install never created there.
 
 ```bash
 idf.py set-target esp32
@@ -112,7 +112,7 @@ Note: ESP-IDF runs an early expansion pass *without* the `BOARD` cache var, and 
 - Owners declare an `inline static CommandEntry commands_[]` table ([CommandEntry.h](main/strux/CommandManager/CommandEntry.h)) with `InvokeCommand<&Owner::Method>` trampolines, and hand it to `CommandManager::Register()` from their `Init()`. Tables must have static storage duration — a registered entry that dies aborts with `FATAL`.
 - `help list` is the registry describing itself and the one command `CommandManager` owns: categories and names come off the chain, and a command's *arguments* come from the command itself, by re-dispatching it with a `DescribeArgReader` that prints the declarations instead of filling them and stops the handler at its own `RETURN_IF_ERROR`. So calling `ctx.readArgs(...)` is not optional — a handler that skips it has no `help` and, worse, runs its body when described (logged as an error).
 - Two transports reach `Execute()`, and they differ *only* below `SessionLink` ([SessionLink.h](main/lib/protocol/SessionLink.h) — the protocol layer lives in `lib/protocol/`, not under a transport, because the transports depend on it and not the reverse): the local browser WebSocket (`WsSessionLink`, frames read on the httpd task) and the outbound relay pipe (`RelaySessionLink`, frames read on the relay's own task via [RelaySocket](main/strux/RelayManager/RelaySocket.h), a WebSocket driven at the transport layer rather than through `esp_websocket_client` — a callback-delivered frame cannot be the bottom of a streaming handler, and going one layer down is what removed the queue, the per-frame `malloc` and the dropped chunks). Both transports therefore *read* on the task that runs the command. Above that seam everything is shared — `Session` (the stream), `protocol::RunCommandSession` in [CommandEnvelope.h](main/lib/protocol/CommandEnvelope.h) (names the request, dispatches it, closes or refuses the reply), and `AuthGate` — so no handler knows or cares which transport it is serving. There is no HTTP command route; HTTP serves static files only. Wire format is binary session chunks `[session:u16 LE][flags:u8][payload]`, not a JSON envelope.
-- Remote access works: `RelayManager` dials out to a server so the device is reachable off-LAN, and the server pulls the device's own frontend with the ordinary `getWebFile` command. Server in its own repository ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)); what is proven and what is left in [docs/backlog/2026-07-03-remote-access.md](docs/backlog/2026-07-03-remote-access.md). Off by default (`relay.enabled`).
+- Remote access works: `RelayManager` dials out to a server so the device is reachable off-LAN, and the server pulls the device's own frontend with the ordinary `getWebFile` command. Server in its own repository ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)), which is also where what is left to do is tracked, as issues. Live at `https://strux.vanbassum.com` behind Traefik and Authentik: a device must be approved and present its own token or the upgrade is refused with a 403. Off by default (`relay.enabled`).
 
 Log lines broadcast to all WebSocket clients via `ConsoleManager`. The frontend side is a singleton `BackendService` ([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies to requests by id and auto-reconnects.
 
@@ -185,7 +185,7 @@ What follows from one page, and is worth keeping in mind:
 
 ### Deliberately out of scope
 
-MQTT and Home Assistant integration were removed 2026-07-06 (last present at tag-time commit `4a41d74`): devices that exist to live in Home Assistant are better served by ESPHome; Strux is for product firmware with its own UI and (planned) relay-based remote access (`docs/backlog/remote-access.md`). Do not reintroduce an MQTT/HA layer in the template — a fork that truly needs it can resurrect the old managers from git history.
+MQTT and Home Assistant integration were removed 2026-07-06 (last present at tag-time commit `4a41d74`): devices that exist to live in Home Assistant are better served by ESPHome; Strux is for product firmware with its own UI and relay-based remote access. Do not reintroduce an MQTT/HA layer in the template — a fork that truly needs it can resurrect the old managers from git history.
 
 ## Conventions
 
