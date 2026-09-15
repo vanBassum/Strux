@@ -2,7 +2,7 @@
 
 **Active work only.** Rewritten constantly, kept tiny, and an item is *removed* when it
 lands or is dropped — never ticked off in place. Everything else lives in
-`docs/backlog/` (work for later) or `docs/reasoning/` (why things are the way they are).
+GitHub issues (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
 Last updated 2026-09-15.
@@ -25,11 +25,3 @@ on the firmware page, and a cold load fetches all three assets without a reset.
 **Outstanding: the bench C3 needs its WiFi back.** Reflashing it to 0.0.7 left NVS
 without a network, so it came up on `Strux-AP-9EA851` and the relay is disabled.
 Reprovision before using it to verify anything above.
-
-**Known gap:** an upload does not surface the device's own flash position, only the
-browser's upload progress.
-
-**Telemetry works end to end** — a manager records a point, the relay writes it to
-InfluxDB, and it queries back tagged by device. No buffering yet: a point taken while
-the relay is down is dropped. That and the other open ends are listed in
-→ [`backlog/2026-08-05-telemetry.md`](backlog/2026-08-05-telemetry.md)

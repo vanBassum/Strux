@@ -46,11 +46,11 @@ There are no automated tests; verification is building, flashing, and driving th
 
 ### Where docs go — three places, nothing else
 
-- **[docs/next-up.md](docs/next-up.md) — what is being worked on *right now*.** Read it first. It is rewritten constantly and deliberately kept tiny: an item is **removed** the moment it lands or is dropped, never annotated, never ticked off in place. Only active work belongs here. If something wants to persist, it does not go in this file — it goes to the backlog (if it is work) or to a note (if it is understanding).
-- **`docs/backlog/` — work for later.** One file per topic. A resolved item is **deleted**, not left with a DONE banner; what mattered about it lives in a note by then.
+- **[docs/next-up.md](docs/next-up.md) — what is being worked on *right now*.** Read it first. It is rewritten constantly and deliberately kept tiny: an item is **removed** the moment it lands or is dropped, never annotated, never ticked off in place. Only active work belongs here. If something wants to persist, it does not go in this file — it becomes a GitHub issue (if it is work) or a note (if it is understanding).
+- **GitHub issues — work for later.** One issue per item, in whichever repository owns it: firmware here, anything server-side in [strux-relay](https://github.com/vanBassum/strux-relay). `docs/backlog/` was this until 2026-09-15 and is gone: a file per topic accumulated open items, settled decisions and hardware-proof logs in one place, so the work was hard to see and the knowledge had nowhere to go when the work finished. An issue holds work only, and what mattered about a closed one lives in a note by then.
 - **`docs/reasoning/` — why things are the way they are.** Append-only, immutable once written, one understanding-delta per note, dated. Never edited: a new understanding is a new note, related to the old one via `builds-on` or `supersedes`. This is the durable record — prefer it over prose documentation anywhere.
 
-Design documents, implementation plans and an ideas folder were all removed on 2026-08-05: they asserted the present tense, so they rotted faster than they were read (see `docs/reasoning/2026-08-05-15h29-a-document-asserts-the-present-tense-so-it-rots.md`). A plan goes in the backlog; the reasoning behind it goes in a note; how to operate something goes in this file. Deleting a doc is not losing it — git has it.
+Design documents, implementation plans and an ideas folder were all removed on 2026-08-05: they asserted the present tense, so they rotted faster than they were read (see `docs/reasoning/2026-08-05-15h29-a-document-asserts-the-present-tense-so-it-rots.md`). A plan goes in an issue; the reasoning behind it goes in a note; how to operate something goes in this file. Deleting a doc is not losing it — git has it.
 
 ## Architecture
 
@@ -114,7 +114,7 @@ Note: ESP-IDF runs an early expansion pass *without* the `BOARD` cache var, and 
 - Two transports reach `Execute()`, and they differ *only* below `SessionLink` ([SessionLink.h](main/lib/protocol/SessionLink.h) — the protocol layer lives in `lib/protocol/`, not under a transport, because the transports depend on it and not the reverse): the local browser WebSocket (`WsSessionLink`, frames read on the httpd task) and the outbound relay pipe (`RelaySessionLink`, frames read on the relay's own task via [RelaySocket](main/strux/RelayManager/RelaySocket.h), a WebSocket driven at the transport layer rather than through `esp_websocket_client` — a callback-delivered frame cannot be the bottom of a streaming handler, and going one layer down is what removed the queue, the per-frame `malloc` and the dropped chunks). Both transports therefore *read* on the task that runs the command. Above that seam everything is shared — `Session` (the stream), `protocol::RunCommandSession` in [CommandEnvelope.h](main/lib/protocol/CommandEnvelope.h) (names the request, dispatches it, closes or refuses the reply), and `AuthGate` — so no handler knows or cares which transport it is serving. There is no HTTP command route; HTTP serves static files only. Wire format is binary session chunks `[session:u16 LE][flags:u8][payload]`, not a JSON envelope.
 - Remote access works: `RelayManager` dials out to a server so the device is reachable off-LAN, and the server pulls the device's own frontend with the ordinary `getWebFile` command. Server in its own repository ([vanBassum/strux-relay](https://github.com/vanBassum/strux-relay)), which is also where what is left to do is tracked, as issues. Live at `https://strux.vanbassum.com` behind Traefik and Authentik: a device must be approved and present its own token or the upgrade is refused with a 403. Off by default (`relay.enabled`).
 
-Log lines broadcast to all WebSocket clients via `ConsoleManager`. The frontend side is a singleton `BackendService` ([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies to requests by id and auto-reconnects.
+Log lines broadcast to all WebSocket clients via `ConsoleManager`. Its log ring is **deliberately** one allocation at `Init`, sized from constants, never freed, and preferring PSRAM where the board has it — it is effectively static already, and turning it into a plain array to satisfy a literal reading of "no dynamic buffers" would cost the PSRAM preference and buy nothing. The frontend side is a singleton `BackendService` ([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies to requests by id and auto-reconnects.
 
 `UpdateManager`'s entire external surface is its command table: session-based updates addressed by partition label (`updateBegin`/`updateWrite`/`updateEnd`), pull OTA from URL, and partition download. App partitions go through `esp_ota_*` (image validation, running slot refused); data partitions are raw erase+write. The built frontend is gzipped into `www/` and flashed as a FAT partition, updatable independently of the app.
 
@@ -131,6 +131,27 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
 
 **A key is at most 15 characters** — NVS's limit, asserted in `Register()` at *runtime*, so an over-long key compiles fine and then boot-loops the device on the assert. Nothing catches it earlier. `telemetry.enabled` (17) does not fit; `telem.enabled` does.
+
+### Telemetry
+
+A manager records a measurement and the relay puts it in InfluxDB: the **device formats
+Influx line protocol**, writes it to the reserved device-initiated session `0xFFFF`, and the
+relay batches lines and POSTs them without reading one. A different reserved id from the
+log broadcast's session 0 because the destination differs — a database, not every browser —
+rather than a discriminator inside the payload. Off unless `telem.enabled`.
+
+Three ways to get the line protocol wrong, each of which fails quietly:
+
+- **The first field takes no leading comma.** The tag buffer legitimately starts with one
+  (it is appended to a tag); the field buffer must not, because it is written straight
+  after the space that ends the tags. Getting this wrong produces `invalid field format`
+  from Influx and nothing else — every point refused, silently, unless you read the
+  relay's log.
+- **An integer field needs the `i` suffix**, or Influx stores it as a float and a later
+  integer write to the same field is rejected as a type conflict.
+- **Testing the relay with hand-written line protocol proves nothing about the device.**
+  It faithfully forwarded a malformed line for 17 points before anyone noticed. The
+  formatter needs a real parser at the other end.
 
 ### The UI is one page, not modules
 
