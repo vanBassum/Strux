@@ -30,6 +30,26 @@ namespace session
     // of this (SERVER_ID_LIMIT), so it can never hand this id out.
     inline constexpr uint16_t TELEMETRY_SESSION = 0xFFFF;
 
+    // Reserved session id for the device's HELLO: one chunk sent immediately after
+    // connect saying what this device is — name, project, firmware version, the commit
+    // it was built from, and whatever else a build cares to report. A flat JSON map of
+    // string keys to string values, all optional.
+    //
+    // A THIRD reserved id rather than a command, because a hello is not a request: the
+    // device is not waiting on an answer, nothing replies to it, and the relay already
+    // dispatches on this header without reading a payload. Making it a command would
+    // have meant the relay calling the device to ask — which inverts who knows the
+    // answer and costs a round trip on every reconnect.
+    //
+    // This is what used to ride the connect URL as query parameters. Every new fact
+    // was one more parameter, and each cost percent-encoding, a slice of a fixed uri_
+    // buffer, and a change on both sides — for display data in the one part of a
+    // connection that is logged, proxied and cached. Only `id` is left up there, which
+    // is the one field the token proves.
+    //
+    // Directly below telemetry, and the relay's server-side range stops short of both.
+    inline constexpr uint16_t HELLO_SESSION = 0xFFFE;
+
     inline uint16_t readU16(const uint8_t* p) { return static_cast<uint16_t>(p[0] | (p[1] << 8)); }
 
     // Writes the 3-byte header into `out`; returns HEADER_LEN.

@@ -49,6 +49,12 @@ class RelayManager
 
     static constexpr int CONNECT_TIMEOUT_MS  = 10000;
 
+    // The hello is ~200 bytes on a socket that just finished its handshake, so this
+    // only ever fires on a pipe that is already broken. Short on purpose: nothing is
+    // waiting on a hello, and blocking the read loop over one would delay the first
+    // command for a device list entry.
+    static constexpr int HELLO_SEND_TIMEOUT_MS = 2000;
+
     // Retry pacing, and two different kinds of waiting. An unreachable server is
     // usually transient — WiFi, DNS, a restart — so the first retry is quick and then
     // doubles, because the tenth attempt is no more likely than the ninth and costs a
@@ -120,9 +126,9 @@ private:
     // identity alongside the session id.
     WsConnection conn_;
 
-    // Sized for the worst case BuildUri() can produce: url + id + fw version +
-    // percent-encoded name and project name.
-    char uri_[384] = {};
+    // Sized for the worst case BuildUri() can produce, which is now only the
+    // configured url plus the device id — everything else moved to the hello.
+    char uri_[256] = {};
     char deviceId_[48] = {};
 
     // 32 hex + NUL. Proves to the server that this device is the id it claims.
@@ -151,6 +157,10 @@ private:
     bool     skipping_ = false;
 
     void BuildUri();
+
+    /// Tell the relay what this device is: one chunk on the reserved hello session,
+    /// sent immediately after every connect. See SendHello's definition.
+    void SendHello();
     void ResolveDeviceId();
     void ResolveToken();
     void TaskLoop();

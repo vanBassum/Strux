@@ -139,61 +139,89 @@ void RelayManager::ResolveToken()
     ESP_LOGI(TAG, "generated a relay token for this device");
 }
 
-// Percent-encodes everything that is not unreserved, which is the safe side of the
-// line for a value going into a query string: device.name is set by a human and may
-// hold spaces, '&' or '='.
-static void AppendEncoded(char* out, size_t cap, const char* in)
-{
-    static const char* HEX = "0123456789abcdef";
-    size_t n = strlen(out);
-    for (; *in && n + 4 < cap; ++in)
-    {
-        const unsigned char c = static_cast<unsigned char>(*in);
-        const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                          (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-                          c == '.' || c == '~';
-        if (safe)
-        {
-            out[n++] = static_cast<char>(c);
-        }
-        else
-        {
-            out[n++] = '%';
-            out[n++] = HEX[c >> 4];
-            out[n++] = HEX[c & 0x0f];
-        }
-    }
-    out[n] = '\0';
-}
-
 void RelayManager::BuildUri()
 {
     char url[128] = {};
     url_.Get(url, sizeof(url));
 
-    // Registration rides the connect URL's query string rather than a protocol
-    // message: the server knows who connected before the first chunk, and the
-    // session protocol gains no relay-specific verb. Firmware version travels with it
-    // for the device list — NOT as a cache key: `www` is replaced independently of the
-    // app, so the version does not describe the frontend (2026-08-11-11h19), and the
-    // relay caches per connection instead, which needs nothing from here.
-    //
-    // Two identities go up here, and they are not the same thing. `id` is technical
-    // and is what the token proves — it addresses the device in every URL. `name` and
-    // `project` are for a human reading the relay's device list, and are display-only:
-    // nothing is ever keyed on them, so a rename cannot cost a device its approval.
-    const esp_app_desc_t* app = esp_app_get_description();
+    // IDENTITY ONLY. `id` is technical, is what the token proves, and is the address
+    // in every relay URL — nothing else belongs in a string that is logged, proxied
+    // and cached on the way. What this device is CALLED, what it runs and what it was
+    // built from go up as a hello on the socket instead (SendHello), where adding a
+    // fact costs a key rather than a query parameter, a percent-encoder and a bigger
+    // buffer on both sides.
     const char* sep = strchr(url, '?') ? "&" : "?";
-    snprintf(uri_, sizeof(uri_), "%s%sid=%s&fw=%s",
-             url, sep, deviceId_, app ? app->version : "unknown");
+    snprintf(uri_, sizeof(uri_), "%s%sid=%s", url, sep, deviceId_);
+}
+
+// Appends a JSON "key":"value" pair, skipping it entirely when the value is empty —
+// an absent key means "this build does not report that", which the relay shows as a
+// blank rather than as the word "unknown".
+static void AppendPair(char* out, size_t cap, const char* key, const char* value)
+{
+    if (!value || value[0] == '\0') return;
+
+    size_t n = strlen(out);
+    if (n + 6 >= cap) return;
+
+    out[n++] = ',';
+    out[n++] = '"';
+    for (const char* k = key; *k && n + 4 < cap; ++k) out[n++] = *k;
+    out[n++] = '"';
+    out[n++] = ':';
+    out[n++] = '"';
+
+    // Only the two characters JSON requires, and control characters dropped. A device
+    // name is typed by a human and may hold a quote or a backslash; it may not hold a
+    // newline, because nothing that sets one allows it.
+    for (const char* v = value; *v && n + 3 < cap; ++v)
+    {
+        const unsigned char c = static_cast<unsigned char>(*v);
+        if (c < 0x20) continue;
+        if (c == '"' || c == '\\') out[n++] = '\\';
+        out[n++] = static_cast<char>(c);
+    }
+
+    out[n++] = '"';
+    out[n] = '\0';
+}
+
+void RelayManager::SendHello()
+{
+    const esp_app_desc_t* app = esp_app_get_description();
 
     char name[48] = {};
     strux_.getSystemManager().GetDeviceName(name, sizeof(name));
-    strlcat(uri_, "&name=", sizeof(uri_));
-    AppendEncoded(uri_, sizeof(uri_), name);
 
-    strlcat(uri_, "&project=", sizeof(uri_));
-    AppendEncoded(uri_, sizeof(uri_), app ? app->project_name : "unknown");
+    char built[32] = {};
+    if (app) snprintf(built, sizeof(built), "%s %s", app->date, app->time);
+
+    // Built in the outbound framing buffer rather than on the stack: this task's
+    // stack is sized for the heaviest command handler and must not also carry this.
+    // Safe to borrow — a hello goes out before any session exists on this pipe.
+    char* body = reinterpret_cast<char*>(sessionFrame_ + session::HEADER_LEN);
+    const size_t cap = sizeof(sessionFrame_) - session::HEADER_LEN;
+
+    // `type` is for whoever reads a packet capture; the relay drops it, because the
+    // SESSION id is what actually names this chunk.
+    snprintf(body, cap, "{\"type\":\"relay hello\"");
+    AppendPair(body, cap, "fw",      app ? app->version : nullptr);
+    AppendPair(body, cap, "commit",  STRUX_GIT_COMMIT);
+    AppendPair(body, cap, "project", app ? app->project_name : nullptr);
+    AppendPair(body, cap, "name",    name);
+    AppendPair(body, cap, "idf",     app ? app->idf_ver : nullptr);
+    AppendPair(body, cap, "built",   built);
+    strlcat(body, "}", cap);
+
+    const size_t len = strlen(body);
+    session::writeHeader(sessionFrame_, session::HELLO_SESSION, session::FLAG_FINAL);
+
+    // Best effort, and deliberately not retried: nothing is waiting on it, and a pipe
+    // that cannot carry 200 bytes is about to fail on its own and reconnect — which
+    // sends the hello again. The cost of a lost one is a device list missing a name
+    // until then.
+    if (!socket_.SendBinary(sessionFrame_, session::HEADER_LEN + len, HELLO_SEND_TIMEOUT_MS))
+        ESP_LOGW(TAG, "could not send hello");
 }
 
 // ──────────────────────────────────────────────────────────
@@ -244,6 +272,10 @@ void RelayManager::TaskLoop()
             reconnectDelayMs_   = RECONNECT_DELAY_MS;
 
             OnConnected();
+            // Before anything else on this pipe, and on every reconnect rather than
+            // once: the relay holds what a device said per connection, and a board
+            // that was reflashed while away is a board whose answers changed.
+            SendHello();
             // Right after connect, because on a wss:// pipe the TLS handshake just
             // ran on this stack and is one of the two things it has to fit.
             CheckStackHeadroom();

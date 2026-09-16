@@ -17,6 +17,28 @@ else()
     set(PROJECT_VER "0.0.0-dev")
 endif()
 
+# ── The commit, which the tag does not give us ────────────────
+# esp_app_desc_t carries version, project_name, date/time and idf_ver but no VCS
+# revision, and the tag above identifies a RELEASE rather than a build: two boards can
+# both report 0.1.0 and be running different code, which is exactly what a device list
+# exists to tell apart. So the SHA is read here and compiled in, and -dirty is part of
+# the answer — a build with uncommitted changes is not the commit it names.
+execute_process(
+    COMMAND git describe --always --dirty --exclude "*"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+    RESULT_VARIABLE GIT_COMMIT_RESULT
+)
+if(NOT GIT_COMMIT_RESULT EQUAL 0)
+    # A source drop with no .git, which is a legitimate way to build this. Empty
+    # rather than "unknown": the device omits the key entirely and the relay shows a
+    # blank cell, which is the truth.
+    set(GIT_COMMIT "")
+endif()
+add_compile_definitions(STRUX_GIT_COMMIT="${GIT_COMMIT}")
+
 # ── Per-board sdkconfig ───────────────────────────────────────
 # Common defaults plus an optional per-board overlay living in the board
 # folder (main/hardware/boards/<board>/sdkconfig.defaults), letting a board
