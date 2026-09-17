@@ -4,6 +4,7 @@ import { useConnectionStatus } from "@/hooks/use-connection-status"
 import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon, BracesIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
   AlertDialog,
@@ -27,7 +28,9 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Unknown error"
 }
 
-// Group settings by prefix (e.g. "wifi.ssid" → "wifi", "mqtt.broker" → "mqtt")
+// Group settings by prefix (e.g. "wifi.ssid" → "wifi", "relay.url" → "relay").
+// Device order is preserved: the registration order already reads sensibly
+// (led, telem, relay, web, ntp, net, wifi, device), so nothing is sorted here.
 function groupSettings(settings: SettingEntry[]): { label: string; prefix: string; items: SettingEntry[] }[] {
   const groups = new Map<string, SettingEntry[]>()
   for (const s of settings) {
@@ -41,6 +44,7 @@ function groupSettings(settings: SettingEntry[]): { label: string; prefix: strin
     wifi: "WiFi",
     device: "Device",
     ntp: "Time & NTP",
+    led: "LED",
   }
 
   return [...groups.entries()].map(([prefix, items]) => ({
@@ -50,36 +54,43 @@ function groupSettings(settings: SettingEntry[]): { label: string; prefix: strin
   }))
 }
 
-// ── Table of contents ────────────────────────────────────────
+// ── Category filter row ──────────────────────────────────────
+//
+// This replaces the old right-hand "On this page" list. That column cost ~12rem
+// of width to do nothing but scroll the page it sat beside; a chip row costs one
+// line and can *filter*, which is the cheaper way to stop scrolling altogether.
 
-function SettingsToc({
+function CategoryFilter({
   groups,
-  activePrefix,
+  active,
+  onSelect,
 }: {
-  groups: { label: string; prefix: string }[]
-  activePrefix: string | null
+  groups: { label: string; prefix: string; items: SettingEntry[] }[]
+  active: string | null
+  onSelect: (prefix: string | null) => void
 }) {
+  const total = groups.reduce((n, g) => n + g.items.length, 0)
+
   return (
-    <div className="space-y-1">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        On this page
-      </p>
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      <Button
+        size="xs"
+        variant={active === null ? "secondary" : "ghost"}
+        onClick={() => onSelect(null)}
+      >
+        All
+        <span className="ml-1 tabular-nums opacity-60">{total}</span>
+      </Button>
       {groups.map((g) => (
-        <a
+        <Button
           key={g.prefix}
-          href={`#settings-${g.prefix}`}
-          onClick={(e) => {
-            e.preventDefault()
-            document.getElementById(`settings-${g.prefix}`)?.scrollIntoView({ behavior: "smooth" })
-          }}
-          className={`block rounded-md px-3 py-1.5 text-sm transition-colors hover:text-foreground ${
-            activePrefix === g.prefix
-              ? "bg-muted font-medium text-foreground"
-              : "text-muted-foreground"
-          }`}
+          size="xs"
+          variant={active === g.prefix ? "secondary" : "ghost"}
+          onClick={() => onSelect(active === g.prefix ? null : g.prefix)}
         >
           {g.label}
-        </a>
+          <span className="ml-1 tabular-nums opacity-60">{g.items.length}</span>
+        </Button>
       ))}
     </div>
   )
@@ -90,12 +101,11 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingEntry[]>([])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [activePrefix, setActivePrefix] = useState<string | null>(null)
+  const [category, setCategory] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [jsonOpen, setJsonOpen] = useState(false)
   const [jsonText, setJsonText] = useState("")
   const [jsonError, setJsonError] = useState("")
-  const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (connection !== "connected") return
@@ -104,24 +114,6 @@ export default function SettingsPage() {
       setDirty(false)
     }).catch((e) => toast.error("Failed to load settings", { description: errorMessage(e) }))
   }, [connection])
-
-  useEffect(() => {
-    if (settings.length === 0 || !scrollRef.current) return
-    const root = scrollRef.current
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            const prefix = (entry.target as HTMLElement).dataset.prefix
-            if (prefix) setActivePrefix(prefix)
-          }
-        }
-      },
-      { root, rootMargin: "-20% 0px -70% 0px" },
-    )
-    root.querySelectorAll<HTMLElement>("[data-prefix]").forEach((el) => observer.observe(el))
-    return () => observer.disconnect()
-  }, [settings])
 
   async function handleChange(key: string, value: string) {
     try {
@@ -190,38 +182,41 @@ export default function SettingsPage() {
   }
 
   const groups = groupSettings(settings)
-  const filteredGroups = search.trim()
-    ? groups
-        .map((g) => ({
-          ...g,
-          items: g.items.filter(
-            (s) =>
-              s.label.toLowerCase().includes(search.toLowerCase()) ||
-              s.key.toLowerCase().includes(search.toLowerCase()),
-          ),
-        }))
-        .filter((g) => g.items.length > 0)
-    : groups
+
+  // Search and category compose: the chips narrow to one group, the search box
+  // narrows within whatever is showing.
+  const needle = search.trim().toLowerCase()
+  const visibleGroups = groups
+    .filter((g) => category === null || g.prefix === category)
+    .map((g) =>
+      needle
+        ? {
+            ...g,
+            items: g.items.filter(
+              (s) => s.label.toLowerCase().includes(needle) || s.key.toLowerCase().includes(needle),
+            ),
+          }
+        : g,
+    )
+    .filter((g) => g.items.length > 0)
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col">
-      {/* Header */}
-      <div className="shrink-0 pb-4">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">Settings</h1>
+    <div className="flex h-full w-full flex-col">
+      {/* Toolbar — title, state, actions; then search + category chips */}
+      <div className="shrink-0 space-y-2 pb-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-bold">Settings</h1>
           {dirty && (
-            <p className="flex-1 text-sm text-amber-500">Unsaved changes — press Save to write to flash.</p>
+            <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-500">
+              Unsaved
+            </span>
           )}
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex items-center gap-1.5">
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                >
-                  <PowerIcon className="mr-1.5 size-3.5" />
-                  Reboot
+                <Button variant="outline" size="sm" className="text-destructive hover:text-destructive">
+                  <PowerIcon />
+                  <span className="hidden sm:inline">Reboot</span>
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
@@ -239,42 +234,56 @@ export default function SettingsPage() {
               </AlertDialogContent>
             </AlertDialog>
             <Button variant="outline" size="sm" onClick={openJsonEditor}>
-              <BracesIcon className="mr-1.5 size-3.5" />
-              JSON
+              <BracesIcon />
+              <span className="hidden sm:inline">JSON</span>
             </Button>
             <Button variant="outline" size="sm" onClick={handleReload}>
-              <Undo2Icon className="mr-1.5 size-3.5" />
-              Undo
+              <Undo2Icon />
+              <span className="hidden sm:inline">Undo</span>
             </Button>
             <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-              <SaveIcon className="mr-1.5 size-3.5" />
+              <SaveIcon />
               {saving ? "Saving..." : "Save"}
             </Button>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="relative w-full sm:w-52">
+            <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              className="h-7 pl-8 text-[13px]"
+              placeholder="Search settings…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          {groups.length > 0 && (
+            <CategoryFilter groups={groups} active={category} onSelect={setCategory} />
+          )}
+        </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 gap-12">
-        {/* Main settings — scrollable */}
-        <div ref={scrollRef} className="min-w-0 flex-1 overflow-y-auto">
-          <div className="space-y-6 pb-6">
-            {settings.length === 0 ? (
-              <div className="rounded-xl border bg-card text-card-foreground shadow-sm">
-                <p className="p-6 text-sm text-muted-foreground">Loading...</p>
-              </div>
-            ) : filteredGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No settings match "{search}".</p>
-            ) : (
-              filteredGroups.map((group) => (
-                <div
-                  key={group.prefix}
-                  id={`settings-${group.prefix}`}
-                  data-prefix={group.prefix}
-                  className="rounded-xl border bg-card text-card-foreground shadow-sm"
-                >
-                  <div className="border-b p-4">
-                    <h2 className="text-lg font-semibold">{group.label}</h2>
-                  </div>
+      {/* Groups — two columns of compact cards on desktop, one on narrow */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {settings.length === 0 ? (
+          <Card size="sm">
+            <CardContent className="text-sm text-muted-foreground">Loading…</CardContent>
+          </Card>
+        ) : visibleGroups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No settings match {needle ? `"${search}"` : "this filter"}.
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 items-start gap-3 pb-6 lg:grid-cols-2">
+            {visibleGroups.map((group) => (
+              <Card key={group.prefix} size="sm" className="gap-0 py-0">
+                <CardHeader className="gap-0 border-b px-3 py-2">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-0">
                   <ul className="divide-y">
                     {group.items.map((setting) => (
                       <SettingRow
@@ -284,31 +293,10 @@ export default function SettingsPage() {
                       />
                     ))}
                   </ul>
-                </div>
-              ))
-            )}
-
+                </CardContent>
+              </Card>
+            ))}
           </div>
-        </div>
-
-        {/* Sidebar — only on wide screens */}
-        {groups.length > 0 && (
-          <aside className="hidden w-48 shrink-0 xl:flex xl:flex-col xl:gap-4">
-            <div className="relative shrink-0">
-              <SearchIcon className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-              <Input
-                className="pl-8 text-sm"
-                placeholder="Search…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <SettingsToc groups={filteredGroups} activePrefix={activePrefix} />
-            </div>
-
-          </aside>
         )}
       </div>
 
@@ -351,6 +339,10 @@ function isSensitive(key: string): boolean {
   return sensitiveKeys.includes(field)
 }
 
+// Every control sits in this fixed-width well, so the right edge of a card is a
+// single line whatever the mix of switches, inputs and the SSID picker above it.
+const CONTROL_WELL = "flex w-40 shrink-0 items-center justify-end"
+
 function SettingRow({
   setting,
   onChange,
@@ -362,36 +354,40 @@ function SettingRow({
   const isPassword = setting.type === "string" && isSensitive(setting.key)
 
   return (
-    <li className="flex items-center justify-between gap-4 p-4">
+    <li className="flex items-center justify-between gap-3 px-3 py-1.5">
       <div className="min-w-0">
-        <div className="text-sm font-medium">{setting.label}</div>
-        <div className="font-mono text-xs text-muted-foreground">{setting.key}</div>
+        <div className="truncate text-[13px] font-medium leading-tight">{setting.label}</div>
+        <div className="truncate font-mono text-[10px] leading-tight text-muted-foreground">
+          {setting.key}
+        </div>
       </div>
 
-      {setting.type === "bool" ? (
-        <Switch
-          checked={Boolean(setting.value)}
-          onCheckedChange={(checked) => onChange(checked ? "true" : "false")}
-        />
-      ) : isWifiSsid ? (
-        <WifiSsidInput value={String(setting.value)} onChange={onChange} />
-      ) : (
-        <Input
-          className="w-48"
-          type={isPassword ? "password" : NUMERIC_SETTING_TYPES.includes(setting.type) ? "number" : "text"}
-          defaultValue={String(setting.value)}
-          onBlur={(e) => {
-            if (e.target.value !== String(setting.value)) {
-              onChange(e.target.value)
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              ;(e.target as HTMLInputElement).blur()
-            }
-          }}
-        />
-      )}
+      <div className={CONTROL_WELL}>
+        {setting.type === "bool" ? (
+          <Switch
+            checked={Boolean(setting.value)}
+            onCheckedChange={(checked) => onChange(checked ? "true" : "false")}
+          />
+        ) : isWifiSsid ? (
+          <WifiSsidInput value={String(setting.value)} onChange={onChange} />
+        ) : (
+          <Input
+            className="h-7 w-full text-[13px]"
+            type={isPassword ? "password" : NUMERIC_SETTING_TYPES.includes(setting.type) ? "number" : "text"}
+            defaultValue={String(setting.value)}
+            onBlur={(e) => {
+              if (e.target.value !== String(setting.value)) {
+                onChange(e.target.value)
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                ;(e.target as HTMLInputElement).blur()
+              }
+            }}
+          />
+        )}
+      </div>
     </li>
   )
 }
@@ -455,20 +451,21 @@ function WifiSsidInput({
   }
 
   return (
-    <div className="relative">
-      <div className="flex gap-1.5">
+    <div className="relative w-full">
+      <div className="flex gap-1">
         <Button
           variant="outline"
           size="icon-sm"
           onClick={handleScan}
           disabled={scanning}
           title="Scan WiFi networks"
+          className="shrink-0"
         >
           <SearchIcon className="size-3.5" />
         </Button>
         <Input
           ref={inputRef}
-          className="w-48"
+          className="h-7 w-full text-[13px]"
           defaultValue={value}
           onBlur={(e) => {
             if (e.target.value !== value) {
