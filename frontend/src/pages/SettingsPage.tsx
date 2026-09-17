@@ -28,7 +28,26 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Unknown error"
 }
 
-type SettingGroup = { label: string; prefix: string; items: SettingEntry[] }
+type SettingGroup = {
+  label: string
+  description?: string
+  prefix: string
+  items: SettingEntry[]
+}
+
+// What a prefix is called and what it is for. A prefix that is not listed still
+// renders — it gets its capitalised key and no description — so a fork adding
+// `foo.bar` needs no edit here, and gains one by adding a row.
+const GROUP_META: Record<string, { label: string; description: string }> = {
+  led: { label: "LED", description: "Status indication and relay link" },
+  telem: { label: "Telem", description: "Telemetry and statistics" },
+  relay: { label: "Relay", description: "Connection to Strux relay" },
+  web: { label: "Web", description: "Integrated web interface" },
+  ntp: { label: "Time & NTP", description: "Time synchronization" },
+  net: { label: "Net", description: "Network settings" },
+  wifi: { label: "WiFi", description: "Wireless network configuration" },
+  device: { label: "Device", description: "Device information and behavior" },
+}
 
 // Group settings by prefix (e.g. "wifi.ssid" → "wifi", "relay.url" → "relay").
 // Device order is preserved: the registration order already reads sensibly
@@ -42,16 +61,10 @@ function groupSettings(settings: SettingEntry[]): SettingGroup[] {
     groups.get(prefix)!.push(s)
   }
 
-  const labels: Record<string, string> = {
-    wifi: "WiFi",
-    device: "Device",
-    ntp: "Time & NTP",
-    led: "LED",
-  }
-
   return [...groups.entries()].map(([prefix, items]) => ({
     prefix,
-    label: labels[prefix] ?? prefix.charAt(0).toUpperCase() + prefix.slice(1),
+    label: GROUP_META[prefix]?.label ?? prefix.charAt(0).toUpperCase() + prefix.slice(1),
+    description: GROUP_META[prefix]?.description,
     items,
   }))
 }
@@ -124,7 +137,7 @@ function CategoryFilter({
     <div className="flex min-w-0 flex-wrap items-center gap-1">
       <Button
         size="xs"
-        variant={active === null ? "secondary" : "ghost"}
+        variant={active === null ? "default" : "ghost"}
         onClick={() => onSelect(null)}
       >
         All
@@ -134,7 +147,7 @@ function CategoryFilter({
         <Button
           key={g.prefix}
           size="xs"
-          variant={active === g.prefix ? "secondary" : "ghost"}
+          variant={active === g.prefix ? "default" : "ghost"}
           onClick={() => onSelect(active === g.prefix ? null : g.prefix)}
         >
           {g.label}
@@ -281,7 +294,10 @@ export default function SettingsPage() {
       {/* Toolbar — title, state, actions; then search + category chips */}
       <div className="shrink-0 space-y-2 pb-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-bold">Settings</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold leading-tight">Settings</h1>
+            <p className="truncate text-sm text-muted-foreground">Configure your Strux device</p>
+          </div>
           {dirty && (
             <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-500">
               Unsaved
@@ -404,24 +420,40 @@ function GroupCard({
   onChange: (key: string, value: string) => void
 }) {
   return (
-    // `overflow-visible` undoes Card's own `overflow-hidden`, which would clip
-    // the WiFi scan dropdown to the card it opens from. The ring and the rounded
-    // corners are Card's, and are what keep the boundary readable at this density.
-    <Card size="sm" className="gap-0 overflow-visible py-0">
-      <CardHeader className="gap-0 border-b p-0">
+    // The card's boundary is a RING, not a border, and that is what makes the
+    // header's tinted corners land cleanly. A ring paints outside the box, so the
+    // card's inner radius equals its outer one and the header's `rounded-t-xl`
+    // follows the boundary exactly; with a 1px border the two radii differ by
+    // that pixel and the tint bleeds past the curve.
+    //
+    // Which leaves `overflow-visible` free to stay, and it has to: Card ships
+    // `overflow-hidden`, which clips the WiFi scan dropdown to the card it opens
+    // from. Clipping the header at the corners and clipping a popover out of
+    // existence are the same property, so the radius has to be solved without it.
+    <Card size="sm" className="gap-0 overflow-visible py-0 ring-border">
+      <CardHeader className="gap-0 rounded-t-xl border-b bg-muted/40 p-0">
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={!collapsed}
-          className="flex w-full items-center gap-1.5 rounded-t-xl px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          title={collapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+          className="flex w-full items-start gap-1.5 rounded-t-xl px-3 py-2 text-left"
         >
+          {/* Desktop matches the concept, which has no chevron; the affordance
+              appears where collapsing is what makes one tall column usable. */}
           <ChevronDownIcon
-            className={`size-3.5 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform lg:hidden ${
+              collapsed ? "-rotate-90" : ""
+            }`}
           />
-          {group.label}
-          <span className="ml-auto font-normal tabular-nums opacity-60">
-            {group.items.length}
-          </span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold leading-tight">{group.label}</div>
+            {group.description && (
+              <div className="truncate text-xs leading-tight text-muted-foreground">
+                {group.description}
+              </div>
+            )}
+          </div>
         </button>
       </CardHeader>
       {!collapsed && (
@@ -454,7 +486,7 @@ function isSensitive(key: string): boolean {
 // single line whatever the mix of switches, inputs and the SSID picker above it.
 // It is the widest thing a row can afford: the label beside it truncates, and a
 // URL or an SSID is the value most worth reading in full.
-const CONTROL_WELL = "flex w-44 shrink-0 items-center justify-end sm:w-56"
+const CONTROL_WELL = "flex w-44 shrink-0 items-center justify-end sm:w-64"
 
 function SettingRow({
   setting,
