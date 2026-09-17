@@ -29,44 +29,71 @@ function errorMessage(e: unknown): string {
 }
 
 type SettingGroup = {
+  id: string
   label: string
-  description?: string
-  prefix: string
   items: SettingEntry[]
 }
 
-// What a prefix is called and what it is for. A prefix that is not listed still
-// renders — it gets its capitalised key and no description — so a fork adding
-// `foo.bar` needs no edit here, and gains one by adding a row.
-const GROUP_META: Record<string, { label: string; description: string }> = {
-  led: { label: "LED", description: "Status indication and relay link" },
-  telem: { label: "Telem", description: "Telemetry and statistics" },
-  relay: { label: "Relay", description: "Connection to Strux relay" },
-  web: { label: "Web", description: "Integrated web interface" },
-  ntp: { label: "Time & NTP", description: "Time synchronization" },
-  net: { label: "Net", description: "Network settings" },
-  wifi: { label: "WiFi", description: "Wireless network configuration" },
-  device: { label: "Device", description: "Device information and behavior" },
+// How settings are PRESENTED, which is not how they are stored.
+//
+// The device namespaces by the manager that owns a setting — `telem.*` belongs to
+// TelemetryManager, `ntp.*` to TimeManager — and that is right on the device,
+// where a namespace says who is responsible for a value. It is the wrong axis for
+// this page: someone looking for "how often does it report, and against which
+// clock" does not care that two managers answer, and eight cards of one or two
+// rows each made them hunt. So a card is a PURPOSE, and this table is the whole
+// mapping: one row per card in display order, listing the key prefixes it gathers.
+//
+// Nothing about storage or addressing moves. A setting is still registered, read
+// and written by its own key — this is a lens over the same list.
+const UI_GROUPS: { id: string; label: string; prefixes: string[] }[] = [
+  { id: "general", label: "General", prefixes: ["device", "led"] },
+  { id: "relay", label: "Relay", prefixes: ["relay"] },
+  { id: "web", label: "Web", prefixes: ["web"] },
+  { id: "telemetry", label: "Telemetry & Time", prefixes: ["telem", "ntp"] },
+  { id: "network", label: "Network", prefixes: ["wifi", "net"] },
+]
+
+// A prefix no row above claims still has to appear. A fork registering `foo.bar`,
+// or a framework manager gaining a setting before this table catches up, must end
+// up visible and editable rather than quietly absent — a settings page that hides
+// a setting is worse than one with a plainly named card on the end.
+const OTHER_GROUP = { id: "other", label: "Other" }
+
+function prefixOf(key: string): string {
+  const dot = key.indexOf(".")
+  return dot > 0 ? key.slice(0, dot) : key
 }
 
-// Group settings by prefix (e.g. "wifi.ssid" → "wifi", "relay.url" → "relay").
-// Device order is preserved: the registration order already reads sensibly
-// (led, telem, relay, web, ntp, net, wifi, device), so nothing is sorted here.
 function groupSettings(settings: SettingEntry[]): SettingGroup[] {
-  const groups = new Map<string, SettingEntry[]>()
+  const owner = new Map<string, string>()
+  for (const g of UI_GROUPS) for (const p of g.prefixes) owner.set(p, g.id)
+
+  const byGroup = new Map<string, SettingEntry[]>()
   for (const s of settings) {
-    const dot = s.key.indexOf(".")
-    const prefix = dot > 0 ? s.key.slice(0, dot) : "general"
-    if (!groups.has(prefix)) groups.set(prefix, [])
-    groups.get(prefix)!.push(s)
+    const id = owner.get(prefixOf(s.key)) ?? OTHER_GROUP.id
+    if (!byGroup.has(id)) byGroup.set(id, [])
+    byGroup.get(id)!.push(s)
   }
 
-  return [...groups.entries()].map(([prefix, items]) => ({
-    prefix,
-    label: GROUP_META[prefix]?.label ?? prefix.charAt(0).toUpperCase() + prefix.slice(1),
-    description: GROUP_META[prefix]?.description,
-    items,
-  }))
+  const groups: SettingGroup[] = []
+  for (const g of UI_GROUPS) {
+    const items = byGroup.get(g.id)
+    if (!items || items.length === 0) continue
+
+    // Rows follow the order their prefixes are listed above, and the device's own
+    // order within a prefix — so General reads Device Name then LED, and because
+    // the sort is stable each prefix's own block is left alone.
+    const rank = new Map(g.prefixes.map((p, i) => [p, i]))
+    items.sort((a, b) => (rank.get(prefixOf(a.key)) ?? 0) - (rank.get(prefixOf(b.key)) ?? 0))
+
+    groups.push({ id: g.id, label: g.label, items })
+  }
+
+  const rest = byGroup.get(OTHER_GROUP.id)
+  if (rest && rest.length > 0) groups.push({ ...OTHER_GROUP, items: rest })
+
+  return groups
 }
 
 // ── Column packing ───────────────────────────────────────────
@@ -145,10 +172,10 @@ function CategoryFilter({
       </Button>
       {groups.map((g) => (
         <Button
-          key={g.prefix}
+          key={g.id}
           size="xs"
-          variant={active === g.prefix ? "default" : "ghost"}
-          onClick={() => onSelect(active === g.prefix ? null : g.prefix)}
+          variant={active === g.id ? "default" : "ghost"}
+          onClick={() => onSelect(active === g.id ? null : g.id)}
         >
           {g.label}
           <span className="ml-1 tabular-nums opacity-60">{g.items.length}</span>
@@ -250,7 +277,7 @@ export default function SettingsPage() {
   // narrows within whatever is showing.
   const needle = search.trim().toLowerCase()
   const visibleGroups = groups
-    .filter((g) => category === null || g.prefix === category)
+    .filter((g) => category === null || g.id === category)
     .map((g) =>
       needle
         ? {
@@ -265,10 +292,10 @@ export default function SettingsPage() {
 
   const [leftColumn, rightColumn] = packColumns(visibleGroups)
 
-  function toggleCollapsed(prefix: string) {
+  function toggleCollapsed(id: string) {
     setCollapsed((prev) => {
       const next = new Set(prev)
-      if (!next.delete(prefix)) next.add(prefix)
+      if (!next.delete(id)) next.add(id)
       return next
     })
   }
@@ -278,10 +305,10 @@ export default function SettingsPage() {
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {column.map((group) => (
           <GroupCard
-            key={group.prefix}
+            key={group.id}
             group={group}
-            collapsed={collapsed.has(group.prefix)}
-            onToggle={() => toggleCollapsed(group.prefix)}
+            collapsed={collapsed.has(group.id)}
+            onToggle={() => toggleCollapsed(group.id)}
             onChange={handleChange}
           />
         ))}
@@ -445,23 +472,16 @@ function GroupCard({
           onClick={onToggle}
           aria-expanded={!collapsed}
           title={collapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
-          className="flex w-full items-start gap-1.5 rounded-t-[calc(var(--radius-xl)_-_1px)] px-3 py-2 text-left"
+          className="flex w-full items-center gap-1.5 rounded-t-[calc(var(--radius-xl)_-_1px)] px-3 py-2 text-left"
         >
-          {/* Desktop matches the concept, which has no chevron; the affordance
-              appears where collapsing is what makes one tall column usable. */}
+          {/* Desktop has no chevron; the affordance appears where collapsing is
+              what makes one tall column usable. */}
           <ChevronDownIcon
-            className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform lg:hidden ${
+            className={`size-3.5 shrink-0 text-muted-foreground transition-transform lg:hidden ${
               collapsed ? "-rotate-90" : ""
             }`}
           />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold leading-tight">{group.label}</div>
-            {group.description && (
-              <div className="truncate text-xs leading-tight text-muted-foreground">
-                {group.description}
-              </div>
-            )}
-          </div>
+          <span className="truncate text-sm font-semibold">{group.label}</span>
         </button>
       </CardHeader>
       {!collapsed && (
