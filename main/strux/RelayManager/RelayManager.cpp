@@ -214,6 +214,14 @@ void RelayManager::SendHello()
     char built[32] = {};
     if (app) snprintf(built, sizeof(built), "%s %s", app->date, app->time);
 
+    // The address the device has on its OWN network, which is the only party that
+    // knows it. What the relay sees on the socket is wherever the connection came
+    // out — a NAT, and behind a reverse proxy its own docker-network peer — so the
+    // column it filled from that was showing 172.18.0.x for every device on the
+    // list. 16 bytes is "255.255.255.255" and its NUL.
+    char ip[16] = {};
+    strux_.getNetworkManager().GetIpv4(ip, sizeof(ip));
+
     // Built in the outbound framing buffer rather than on the stack: this task's
     // stack is sized for the heaviest command handler and must not also carry this.
     // Safe to borrow — a hello goes out before any session exists on this pipe.
@@ -254,6 +262,9 @@ void RelayManager::SendHello()
                                                                          // way to build this, and it yields an empty string.
         {   "idf",      app ? app->idf_ver : nullptr,        false   },  // ESP-IDF version the image was built against
         {   "built",    built,                               false   },  // compile date and time, from esp_app_desc_t
+        {   "ip",       ip,                                  true    },  // this device's address on its own LAN. Required: the hello goes
+                                                                         // out over a socket that is already up, so an IPv4 exists by
+                                                                         // definition here, and an empty one is a bug in this firmware.
     };
 
     // `type` is for whoever reads a packet capture; the relay drops it, because the
