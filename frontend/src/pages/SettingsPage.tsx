@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { backend, NUMERIC_SETTING_TYPES, type SettingEntry, type WifiNetwork } from "@/lib/backend"
 import { useConnectionStatus } from "@/hooks/use-connection-status"
-import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon, BracesIcon } from "lucide-react"
+import { SaveIcon, Undo2Icon, PowerIcon, SearchIcon, LockIcon, BracesIcon, ChevronDownIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import {
   AlertDialog,
@@ -28,10 +28,12 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Unknown error"
 }
 
+type SettingGroup = { label: string; prefix: string; items: SettingEntry[] }
+
 // Group settings by prefix (e.g. "wifi.ssid" → "wifi", "relay.url" → "relay").
 // Device order is preserved: the registration order already reads sensibly
 // (led, telem, relay, web, ntp, net, wifi, device), so nothing is sorted here.
-function groupSettings(settings: SettingEntry[]): { label: string; prefix: string; items: SettingEntry[] }[] {
+function groupSettings(settings: SettingEntry[]): SettingGroup[] {
   const groups = new Map<string, SettingEntry[]>()
   for (const s of settings) {
     const dot = s.key.indexOf(".")
@@ -54,6 +56,53 @@ function groupSettings(settings: SettingEntry[]): { label: string; prefix: strin
   }))
 }
 
+// ── Column packing ───────────────────────────────────────────
+//
+// A `grid-cols-2` put both columns on shared rows, so a short card sat beside a
+// tall one and the row grew to the taller of the two — the gap under Net was the
+// height of Relay. The columns have to flow independently.
+//
+// `columns-2` is the CSS answer and it is one class, but a multi-column box
+// clips absolutely positioned descendants to the column, and this page has
+// one: the WiFi scan dropdown. So the split is done here and each column is an
+// ordinary flex stack, which also leaves `position: absolute` behaving normally.
+//
+// Cards are handed out as a PREFIX, not round-robin: the left column takes
+// groups until it is the taller half, then everything else goes right. That
+// keeps document order, so stacking the two columns on a narrow screen gives
+// back exactly the device's own ordering with no reshuffle.
+function packColumns(groups: SettingGroup[]): [SettingGroup[], SettingGroup[]] {
+  // Rows dominate the height of a card; the 1 is its header.
+  const weight = (g: SettingGroup) => 1 + g.items.length
+  const total = groups.reduce((n, g) => n + weight(g), 0)
+
+  const left: SettingGroup[] = []
+  const right: SettingGroup[] = []
+  let filled = 0
+  let filling = true
+
+  for (const g of groups) {
+    const w = weight(g)
+    // Straddle the midpoint rather than stopping short of it, so the card that
+    // crosses half lands wherever it leaves the two columns closest in height.
+    if (filling && filled + w / 2 <= total / 2) {
+      left.push(g)
+      filled += w
+    } else {
+      // Once the split has happened it must not reopen, or a later small group
+      // would jump back to the left and break document order.
+      filling = false
+      right.push(g)
+    }
+  }
+
+  // One very tall first card can clear the midpoint on its own and leave the
+  // left column empty; it still belongs on the left.
+  if (left.length === 0 && right.length > 0) left.push(right.shift()!)
+
+  return [left, right]
+}
+
 // ── Category filter row ──────────────────────────────────────
 //
 // This replaces the old right-hand "On this page" list. That column cost ~12rem
@@ -65,7 +114,7 @@ function CategoryFilter({
   active,
   onSelect,
 }: {
-  groups: { label: string; prefix: string; items: SettingEntry[] }[]
+  groups: SettingGroup[]
   active: string | null
   onSelect: (prefix: string | null) => void
 }) {
@@ -102,6 +151,7 @@ export default function SettingsPage() {
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [category, setCategory] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [search, setSearch] = useState("")
   const [jsonOpen, setJsonOpen] = useState(false)
   const [jsonText, setJsonText] = useState("")
@@ -200,6 +250,32 @@ export default function SettingsPage() {
     )
     .filter((g) => g.items.length > 0)
 
+  const [leftColumn, rightColumn] = packColumns(visibleGroups)
+
+  function toggleCollapsed(prefix: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(prefix)) next.add(prefix)
+      return next
+    })
+  }
+
+  function renderColumn(column: SettingGroup[]) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        {column.map((group) => (
+          <GroupCard
+            key={group.prefix}
+            group={group}
+            collapsed={collapsed.has(group.prefix)}
+            onToggle={() => toggleCollapsed(group.prefix)}
+            onChange={handleChange}
+          />
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full w-full flex-col">
       {/* Toolbar — title, state, actions; then search + category chips */}
@@ -275,27 +351,11 @@ export default function SettingsPage() {
             No settings match {needle ? `"${search}"` : "this filter"}.
           </p>
         ) : (
-          <div className="grid grid-cols-1 items-start gap-3 pb-6 lg:grid-cols-2">
-            {visibleGroups.map((group) => (
-              <Card key={group.prefix} size="sm" className="gap-0 py-0">
-                <CardHeader className="gap-0 border-b px-3 py-2">
-                  <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    {group.label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-0">
-                  <ul className="divide-y">
-                    {group.items.map((setting) => (
-                      <SettingRow
-                        key={setting.key}
-                        setting={setting}
-                        onChange={(value) => handleChange(setting.key, value)}
-                      />
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            ))}
+          // Two independent stacks side by side, one above the other on narrow
+          // screens — where the prefix split means they read in device order.
+          <div className="flex flex-col gap-3 pb-6 lg:flex-row lg:items-start">
+            {renderColumn(leftColumn)}
+            {renderColumn(rightColumn)}
           </div>
         )}
       </div>
@@ -330,6 +390,57 @@ export default function SettingsPage() {
 }
 
 
+// ── Group card ───────────────────────────────────────────────
+
+function GroupCard({
+  group,
+  collapsed,
+  onToggle,
+  onChange,
+}: {
+  group: SettingGroup
+  collapsed: boolean
+  onToggle: () => void
+  onChange: (key: string, value: string) => void
+}) {
+  return (
+    // `overflow-visible` undoes Card's own `overflow-hidden`, which would clip
+    // the WiFi scan dropdown to the card it opens from. The ring and the rounded
+    // corners are Card's, and are what keep the boundary readable at this density.
+    <Card size="sm" className="gap-0 overflow-visible py-0">
+      <CardHeader className="gap-0 border-b p-0">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          className="flex w-full items-center gap-1.5 rounded-t-xl px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        >
+          <ChevronDownIcon
+            className={`size-3.5 transition-transform ${collapsed ? "-rotate-90" : ""}`}
+          />
+          {group.label}
+          <span className="ml-auto font-normal tabular-nums opacity-60">
+            {group.items.length}
+          </span>
+        </button>
+      </CardHeader>
+      {!collapsed && (
+        <CardContent className="px-0">
+          <ul className="divide-y">
+            {group.items.map((setting) => (
+              <SettingRow
+                key={setting.key}
+                setting={setting}
+                onChange={(value) => onChange(setting.key, value)}
+              />
+            ))}
+          </ul>
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
 // ── Setting row ──────────────────────────────────────────────
 
 const sensitiveKeys = ["password", "pass"]
@@ -341,7 +452,9 @@ function isSensitive(key: string): boolean {
 
 // Every control sits in this fixed-width well, so the right edge of a card is a
 // single line whatever the mix of switches, inputs and the SSID picker above it.
-const CONTROL_WELL = "flex w-40 shrink-0 items-center justify-end"
+// It is the widest thing a row can afford: the label beside it truncates, and a
+// URL or an SSID is the value most worth reading in full.
+const CONTROL_WELL = "flex w-44 shrink-0 items-center justify-end sm:w-56"
 
 function SettingRow({
   setting,
