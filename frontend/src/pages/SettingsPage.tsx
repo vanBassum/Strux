@@ -420,24 +420,32 @@ function GroupCard({
   onChange: (key: string, value: string) => void
 }) {
   return (
-    // The card's boundary is a RING, not a border, and that is what makes the
-    // header's tinted corners land cleanly. A ring paints outside the box, so the
-    // card's inner radius equals its outer one and the header's `rounded-t-xl`
-    // follows the boundary exactly; with a 1px border the two radii differ by
-    // that pixel and the tint bleeds past the curve.
+    // The boundary is a real BORDER, and it has to be. Card's own edge is
+    // `ring-1`, which is a box-shadow: its spread does not participate in layout
+    // and so is not snapped to the device pixel grid. Under Windows display
+    // scaling a 1px ring anti-aliases to a fraction of a pixel and disappears —
+    // visibly so over the white rows, where the header's tint was left doing the
+    // whole job of suggesting an edge. A border is laid out, so it snaps and
+    // stays crisp. `ring-0` retires the inherited one rather than stacking.
     //
-    // Which leaves `overflow-visible` free to stay, and it has to: Card ships
-    // `overflow-hidden`, which clips the WiFi scan dropdown to the card it opens
-    // from. Clipping the header at the corners and clipping a popover out of
-    // existence are the same property, so the radius has to be solved without it.
-    <Card size="sm" className="gap-0 overflow-visible py-0 ring-border">
-      <CardHeader className="gap-0 rounded-t-xl border-b bg-muted/40 p-0">
+    // The cost is one pixel of radius: a border insets the padding box, so the
+    // card's inner curve is a pixel tighter than its outer one, and a header
+    // asking for the outer radius would bleed its tint past the curve. It asks
+    // for `--radius-xl` minus that pixel, derived rather than hardcoded so the
+    // two stay in step. That keeps `overflow-hidden` unnecessary — and it has to stay
+    // unnecessary, because it is the property that clips the WiFi scan dropdown
+    // out of existence.
+    <Card
+      size="sm"
+      className="gap-0 overflow-visible rounded-xl border border-border py-0 shadow-sm ring-0"
+    >
+      <CardHeader className="gap-0 rounded-t-[calc(var(--radius-xl)_-_1px)] border-b bg-muted/40 p-0">
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={!collapsed}
           title={collapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
-          className="flex w-full items-start gap-1.5 rounded-t-xl px-3 py-2 text-left"
+          className="flex w-full items-start gap-1.5 rounded-t-[calc(var(--radius-xl)_-_1px)] px-3 py-2 text-left"
         >
           {/* Desktop matches the concept, which has no chevron; the affordance
               appears where collapsing is what makes one tall column usable. */}
