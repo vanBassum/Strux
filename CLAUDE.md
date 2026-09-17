@@ -26,7 +26,7 @@ Frontend (React 19 + TypeScript + Vite + Tailwind + shadcn/ui, package manager i
 ```bash
 cd frontend
 pnpm dev          # hot-reload dev server, proxies WebSocket to a running device
-pnpm build        # tsc -b && vite build && gzip into ../www (embedded in flash as FAT image)
+pnpm build        # tsc -b && vite build into ../www (packed and linked into the app image)
 pnpm typecheck    # tsc -b --force (plain `tsc --noEmit` checks NOTHING:
                   # the root tsconfig has files: [])
 ```
@@ -116,7 +116,7 @@ Note: ESP-IDF runs an early expansion pass *without* the `BOARD` cache var, and 
 
 Log lines broadcast to all WebSocket clients via `ConsoleManager`. Its log ring is **deliberately** one allocation at `Init`, sized from constants, never freed, and preferring PSRAM where the board has it — it is effectively static already, and turning it into a plain array to satisfy a literal reading of "no dynamic buffers" would cost the PSRAM preference and buy nothing. The frontend side is a singleton `BackendService` ([frontend/src/lib/backend.ts](frontend/src/lib/backend.ts)) that matches replies to requests by id and auto-reconnects.
 
-`UpdateManager`'s entire external surface is its command table: session-based updates addressed by partition label (`updateBegin`/`updateWrite`/`updateEnd`), pull OTA from URL, and partition download. App partitions go through `esp_ota_*` (image validation, running slot refused); data partitions are raw erase+write. The built frontend is gzipped into `www/` and flashed as a FAT partition, updatable independently of the app.
+`UpdateManager`'s entire external surface is its command table: session-based updates addressed by partition label (`updateBegin`/`updateWrite`/`updateEnd`), pull OTA from URL, and partition download. App partitions go through `esp_ota_*` (image validation, running slot refused); data partitions are raw erase+write. The built frontend is **not** a partition: `main/strux/WebAssets/pack_web_assets.py` packs `www/` into one gzipped-per-file blob that `EMBED_FILES` links into the app image, so a firmware image is the whole product and a UI change is an ordinary app OTA. `WebAssets` is a const table over that blob in flash-mapped rodata — no RAM, no filesystem, no mount — and both serving routes (the local HTTP route and `web read`) go through `StaticFileHandler::Resolve` into it. One blob rather than one `EMBED_FILES` entry per asset because vite content-hashes its filenames and `EMBED_FILES` needs its list when CMake configures.
 
 ### Settings
 
