@@ -14,19 +14,17 @@ carry a one-line description and describe each argument; `help describe` returns
 whole registry in one reply and `system describe` returns the product's own description
 and instructions (`main/app/DeviceDoc.h`). The relay exposes three generic tools at
 `/mcp` — `devices`, `describe`, `execute` — gated by a per-device switch on its
-dashboard, and knows nothing about any device.
-→ [`reasoning/…a-device-that-describes-itself…`](reasoning/2026-09-18-10h50-a-device-that-describes-itself-needs-no-tool-of-its-own.md)
+dashboard, and knows nothing about any device. Live at `https://strux.vanbassum.com/mcp`
+(relay v0.4.1), routed past Authentik and holding its own bearer token, and driven end to
+end from outside: a real board answered `system ping` through it.
+→ [`reasoning/…a-device-that-describes-itself…`](reasoning/2026-09-18-10h50-a-device-that-describes-itself-needs-no-tool-of-its-own.md),
+[`reasoning/…forward-auth-is-for-people…`](reasoning/2026-09-18-11h15-forward-auth-is-for-people-so-a-machine-endpoint-has-to-carry-its-own-credential.md)
 
 **The frontend lives in the app image, and the `www` partition is gone.** `www/` is
 packed into one blob (`main/strux/WebAssets/`) and linked in with `EMBED_FILES`; the FAT
 mount, the `fatfs`/`wear_levelling` components and the per-file `.gz` step are all
 deleted. Both OTA slots grew to 0x1F0000 and fill the 4 MB flash exactly.
 → [`reasoning/…the-ui-was-a-second-deliverable…`](reasoning/2026-09-17-10h05-the-ui-was-a-second-deliverable-and-a-partition-is-what-made-it-one.md)
-
-**Outstanding: the relay's MCP endpoint has no auth of its own.** It sits beside the
-dashboard, so in production it is behind Authentik like everything but `/device` — right
-for a browser, awkward for an MCP client. Whether that wants a token, a proxy exception
-or nothing at all has not been decided.
 
 **Outstanding: two bench checks the wire cannot answer.** A devkit on COM3 is flashed
 and driven (0.0.8 at 192.168.50.202): the new table boots, `partition status`/`list`
