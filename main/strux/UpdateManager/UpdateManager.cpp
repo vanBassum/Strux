@@ -195,8 +195,15 @@ RequestError UpdateManager::Cmd_WritePartition(CommandContext& ctx)
     // An explicit offset (including 0) means the sender is driving the upload in
     // pieces and owns the clearPartition and activatePartition steps itself.
     RETURN_IF_ERROR(ctx.readArgs(
-        Required("partition", label),
-        Optional("offset",    offset)
+        Required("partition", label,
+                 "Label of the partition to write, as 'partition list' reports it. "
+                 "The running app slot is always refused."),
+        Optional("offset",    offset,
+                 "Byte offset to write at. Omit it for a one-shot upload - the "
+                 "whole image in one command, erased and activated by the device. "
+                 "Giving one (including 0) means you are driving the upload in "
+                 "pieces and own the 'partition clear' and 'partition activate' "
+                 "steps yourself.")
     ));
 
     // `in` is now positioned at the body, past the envelope.
@@ -295,7 +302,8 @@ RequestError UpdateManager::Cmd_WritePartition(CommandContext& ctx)
 RequestError UpdateManager::Cmd_ClearPartition(CommandContext& ctx)
 {
     char label[17] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
+        "Label of the partition, as 'partition list' reports it.")));
 
     auto resp = ctx.reply.object();
     if (const char* err = PartitionWriter::Clear(label))
@@ -311,7 +319,8 @@ RequestError UpdateManager::Cmd_ClearPartition(CommandContext& ctx)
 RequestError UpdateManager::Cmd_ActivatePartition(CommandContext& ctx)
 {
     char label[17] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
+        "Label of the partition, as 'partition list' reports it.")));
 
     auto resp = ctx.reply.object();
     if (const char* err = PartitionWriter::Activate(label))
@@ -331,7 +340,8 @@ RequestError UpdateManager::Cmd_ActivatePartition(CommandContext& ctx)
 RequestError UpdateManager::Cmd_DownloadPartition(CommandContext& ctx)
 {
     char label[17] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label)));
+    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
+        "Label of the partition, as 'partition list' reports it.")));
 
     const esp_partition_t* p = esp_partition_find_first(
         ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, label);

@@ -26,7 +26,7 @@ bool RelaySocket::ParseUri(const char* uri)
     else if (strncmp(p, "ws://", 5) == 0)  { tls_ = false; p += 5; }
     else
     {
-        ESP_LOGE(TAG, "relay.url must start with ws:// or wss:// — got '%s'", uri);
+        ESP_LOGE(TAG, "relay.url must start with ws:// or wss:// - got '%s'", uri);
         return false;
     }
 
@@ -192,7 +192,7 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
 
         if (total >= cap)
         {
-            ESP_LOGE(TAG, "inbound message exceeds %u bytes — closing the pipe",
+            ESP_LOGE(TAG, "inbound message exceeds %u bytes - closing the pipe",
                      static_cast<unsigned>(cap));
             return -1;
         }

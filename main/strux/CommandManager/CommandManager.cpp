@@ -97,8 +97,12 @@ RequestError CommandManager::Cmd_Help(CommandContext& ctx)
     char command[MAX_ROUTE]  = {};
 
     RETURN_IF_ERROR(ctx.readArgs(
-        Optional("category", category),
-        Optional("command",  command)
+        Optional("category", category,
+                 "Limit the answer to one category, e.g. 'partition'. Omit it to list "
+                 "every category and its commands."),
+        Optional("command",  command,
+                 "Describe this one command's arguments. Needs 'category' as well, "
+                 "because a route is two words.")
     ));
 
     if (command[0] != '\0')
@@ -112,6 +116,28 @@ RequestError CommandManager::Cmd_Help(CommandContext& ctx)
     return RequestError::Ok;
 }
 
+size_t CommandManager::CollectCategories(const char** out, size_t cap, bool& truncated)
+{
+    // The chain has no notion of a category, so the distinct ones are collected by
+    // walking it. Fixed array, and it says so when it fills up rather than quietly
+    // answering with part of the registry.
+    size_t count = 0;
+    truncated = false;
+
+    for (const CommandEntry* e = head_; e != nullptr; e = e->next)
+    {
+        bool known = false;
+        for (size_t i = 0; i < count && !known; ++i)
+            known = strcmp(out[i], e->category) == 0;
+        if (known) continue;
+
+        if (count == cap) { truncated = true; break; }
+        out[count++] = e->category;
+    }
+
+    return count;
+}
+
 void CommandManager::ListCategories(ReplyWriter& reply)
 {
     // Held across the JSON, so a manager registering from another task cannot relink
@@ -120,23 +146,9 @@ void CommandManager::ListCategories(ReplyWriter& reply)
     // pair of locks to take in two orders.
     LOCK(mutex_);
 
-    // The chain has no notion of a category, so collect the distinct ones first.
-    // Fixed array, and it says so when it fills up rather than quietly answering with
-    // part of the registry.
     const char* seen[MAX_CATEGORIES];
-    size_t count = 0;
     bool truncated = false;
-
-    for (const CommandEntry* e = head_; e != nullptr; e = e->next)
-    {
-        bool known = false;
-        for (size_t i = 0; i < count && !known; ++i)
-            known = strcmp(seen[i], e->category) == 0;
-        if (known) continue;
-
-        if (count == MAX_CATEGORIES) { truncated = true; break; }
-        seen[count++] = e->category;
-    }
+    const size_t count = CollectCategories(seen, MAX_CATEGORIES, truncated);
 
     auto resp = reply.object();
     resp.field("ok", true);
@@ -206,26 +218,94 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
     resp.field("ok", true);
     resp.field("category", e->category);
     resp.field("command", e->name);
+    if (e->help != nullptr && e->help[0] != '\0')
+        resp.field("description", e->help);
 
+    auto args = resp.array("arguments");
+    if (!DescribeArguments(*e, args))
+        resp.field("declared", false);   // writing to the parent closes `args`
+
+    return RequestError::Ok;
+}
+
+bool CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& args)
+{
     // Not through Execute(): that one is the wire path — it builds the reader for
     // today's format and reports which argument a parse tripped over. Here the reader
     // IS the point, and there is no request to parse.
-    auto args = resp.array("arguments");
     DescribeArgReader reader(args);
     NullStream sink;
     JsonReplyWriter nowhere(sink);   // the described handler is stopped before it replies
     CommandContext described(reader, nowhere, sink, sink, nullptr);
-    const RequestError r = e->handler(e->ctx, described);
 
-    if (r != RequestError::Described)
+    if (entry.handler(entry.ctx, described) == RequestError::Described)
+        return true;
+
+    // The handler returned without ever asking for its arguments, which means it ran
+    // its body — under help, against streams that go nowhere. Nothing here can undo
+    // that; the fix is a readArgs call in the handler.
+    ESP_LOGE(TAG, "'%s %s' declares no arguments - its body ran under help",
+             entry.category, entry.name);
+    return false;
+}
+
+RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
+{
+    char category[MAX_ROUTE] = {};
+
+    RETURN_IF_ERROR(ctx.readArgs(
+        Optional("category", category,
+                 "Describe only this category's commands. Omit it for the whole "
+                 "registry, which is the usual call.")
+    ));
+
+    // Held across the whole reply, for the same reason ListCategories holds it — and
+    // with one addition: every handler on the chain is re-dispatched from in here.
+    // That is safe because a described handler is stopped at its own readArgs before
+    // its body runs, so it registers nothing and dispatches nothing; the mutex is
+    // recursive anyway, so a handler that did would not deadlock.
+    LOCK(mutex_);
+
+    const char* seen[MAX_CATEGORIES];
+    bool truncated = false;
+    const size_t count = CollectCategories(seen, MAX_CATEGORIES, truncated);
+
+    auto resp = ctx.reply.object();
+    resp.field("ok", true);
     {
-        // The handler returned without ever asking for its arguments, which means it
-        // ran its body — under help, against streams that go nowhere. Nothing here
-        // can undo that; the fix is a readArgs call in the handler.
-        ESP_LOGE(TAG, "'%s %s' declares no arguments — its body ran under help",
-                 e->category, e->name);
-        resp.field("declared", false);   // closes `args`
+        auto cats = resp.array("categories");
+        for (size_t i = 0; i < count; ++i)
+        {
+            if (category[0] != '\0' && strcmp(category, seen[i]) != 0)
+                continue;
+
+            auto cat = cats.object();
+            cat.field("category", seen[i]);
+
+            auto commands = cat.array("commands");
+            for (const CommandEntry* e = head_; e != nullptr; e = e->next)
+            {
+                if (strcmp(seen[i], e->category) != 0) continue;
+
+                auto cmd = commands.object();
+                cmd.field("name", e->name);
+                if (e->help != nullptr && e->help[0] != '\0')
+                    cmd.field("description", e->help);
+
+                auto args = cmd.array("arguments");
+                if (!DescribeArguments(*e, args))
+                {
+                    // An undeclared handler wrote nothing to the array, and an empty
+                    // array reads as "takes no arguments" — which is a lie a caller
+                    // would act on. Writing to the parent closes `args` and says so.
+                    cmd.field("declared", false);
+                }
+            }
+        }
     }
+    if (truncated)
+        resp.field("truncated", true);
+
     return RequestError::Ok;
 }
 

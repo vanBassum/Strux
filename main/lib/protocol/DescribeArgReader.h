@@ -33,6 +33,10 @@ public:
             // argument is refused, which is the number a caller actually needs.
             if (s.type == ArgType::String && s.cap > 0)
                 arg.field("maxLength", static_cast<uint32_t>(s.cap - 1));
+            // Absent rather than empty when the command did not describe it, so a
+            // reader can tell "nothing was said" from "said to be nothing".
+            if (s.help != nullptr && s.help[0] != '\0')
+                arg.field("description", s.help);
         }
         return RequestError::Described;
     }

@@ -82,9 +82,19 @@ private:
     RequestError Cmd_AuthResume(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "web",  "read",   &InvokeCommand<&WebServerManager::Cmd_GetWebFile> },
-        { "auth", "hello",  &InvokeCommand<&WebServerManager::Cmd_AuthHello>  },
-        { "auth", "login",  &InvokeCommand<&WebServerManager::Cmd_AuthLogin>  },
-        { "auth", "resume", &InvokeCommand<&WebServerManager::Cmd_AuthResume> },
+        { "web",  "read",   &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
+          "Read one file of the device's own web UI. The reply is a JSON header "
+          "line (status, content type, encoding), a newline, then the raw bytes - "
+          "which may be gzipped. It serves the device's browser page; it is not a "
+          "general filesystem." },
+        { "auth", "hello",  &InvokeCommand<&WebServerManager::Cmd_AuthHello>,
+          "Ask whether this connection has to log in before anything else will be "
+          "answered. With no web password set - the default - it never does." },
+        { "auth", "login",  &InvokeCommand<&WebServerManager::Cmd_AuthLogin>,
+          "Authenticate this connection with the device's web password. On success "
+          "the reply carries a session key that 'auth resume' takes." },
+        { "auth", "resume", &InvokeCommand<&WebServerManager::Cmd_AuthResume>,
+          "Re-authenticate a reconnected client with the session key a previous "
+          "'auth login' handed out, instead of the password again." },
     };
 };

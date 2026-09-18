@@ -72,7 +72,7 @@ void NetworkManager::Init()
     }
     else
     {
-        ESP_LOGI(TAG, "mDNS disabled — this device is reachable by address only");
+        ESP_LOGI(TAG, "mDNS disabled - this device is reachable by address only");
     }
 
     // One timer drives the whole cycle — see OnCycleTimer.

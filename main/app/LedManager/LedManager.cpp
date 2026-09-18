@@ -81,7 +81,9 @@ RequestError LedManager::Cmd_Set(CommandContext& ctx)
     bool enabled = enabled_.Get();
 
     RETURN_IF_ERROR(ctx.readArgs(
-        Optional("enabled", enabled)
+        Optional("enabled", enabled,
+                 "true lights the LED while the relay link is up; false keeps the "
+                 "board dark. Absent leaves the current setting alone.")
     ));
 
     SetEnabled(enabled);

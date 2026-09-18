@@ -3,6 +3,8 @@
 #include "AppProvider.h"
 #include "BoardContext.h"
 #include "StruxProvider.h"
+#include "SystemManager.h"
+#include "DeviceDoc.h"
 #include "LedManager/LedManager.h"
 
 // The application layer's context: owns this product's managers and answers AppProvider.
@@ -29,6 +31,12 @@ public:
     /// framework, so the framework has to be ready before any of this runs.
     void Init()
     {
+        // What this product is, in the product's own words — registered like
+        // everything else the application tells the framework about itself, and read
+        // back by `system describe` and by the relay hello. See DeviceDoc.h.
+        strux_.getSystemManager().SetDocumentation(
+            DeviceDoc::DESCRIPTION, DeviceDoc::INSTRUCTIONS);
+
         ledManager_.Init();
     }
 

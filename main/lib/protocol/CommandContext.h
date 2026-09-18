@@ -67,18 +67,28 @@ struct ArgSpec
     size_t      cap;       // strings only
     ArgType     type;
     bool        required;
+
+    /// What this argument MEANS, for whoever has to compose a call without reading
+    /// the source — a person at `help`, or a model at the other end of the relay's
+    /// MCP surface. A name and a type say how to spell a value, never which one:
+    /// `address` is a uint32 in both a partition write and a WiFi command.
+    ///
+    /// Optional, a string literal, and read only by DescribeArgReader, so an
+    /// undescribed argument costs a null pointer and nothing on the wire. Units,
+    /// ranges and defaults belong here — they are the part a caller cannot guess.
+    const char* help = nullptr;
 };
 
 // Capacity is deduced from the array, so `sizeof` never appears at a call site.
 template <size_t N>
-inline ArgSpec Required(const char* name, char (&dst)[N]) { return { name, dst, N, ArgType::String, true }; }
-inline ArgSpec Required(const char* name, uint32_t& dst)  { return { name, &dst, 0, ArgType::UInt32, true }; }
-inline ArgSpec Required(const char* name, bool& dst)      { return { name, &dst, 0, ArgType::Bool,   true }; }
+inline ArgSpec Required(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, true, help }; }
+inline ArgSpec Required(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, true, help }; }
+inline ArgSpec Required(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   true, help }; }
 
 template <size_t N>
-inline ArgSpec Optional(const char* name, char (&dst)[N]) { return { name, dst, N, ArgType::String, false }; }
-inline ArgSpec Optional(const char* name, uint32_t& dst)  { return { name, &dst, 0, ArgType::UInt32, false }; }
-inline ArgSpec Optional(const char* name, bool& dst)      { return { name, &dst, 0, ArgType::Bool,   false }; }
+inline ArgSpec Optional(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, false, help }; }
+inline ArgSpec Optional(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, false, help }; }
+inline ArgSpec Optional(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   false, help }; }
 
 /// Reads a request's arguments off a stream. One implementation per wire format; a
 /// handler never learns which one it got.

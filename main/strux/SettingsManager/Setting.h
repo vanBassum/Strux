@@ -51,7 +51,7 @@ struct Setting
     virtual ~Setting()
     {
         if (registered)
-            FATAL("registered setting '%s' destroyed — setting tables must "
+            FATAL("registered setting '%s' destroyed - setting tables must "
                   "live for the whole application", key);
     }
 

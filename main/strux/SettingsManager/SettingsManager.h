@@ -82,8 +82,15 @@ private:
     RequestError Cmd_SaveSettings(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings> },
-        { "settings", "set",  &InvokeCommand<&SettingsManager::Cmd_SetSetting> },
-        { "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings> },
+        { "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
+          "List every setting registered on this device with its key, label, type "
+          "and current value. This is the whole configuration surface - there are "
+          "no hidden keys." },
+        { "settings", "set",  &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
+          "Change one setting's value in RAM. NOT durable on its own: call "
+          "'settings save' afterwards or the change is lost at the next reboot." },
+        { "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
+          "Commit every setting changed with 'settings set' to NVS so they survive "
+          "a reboot. Several settings only take effect after one." },
     };
 };

@@ -54,7 +54,7 @@ void RelayManager::Init()
     url_.Get(url, sizeof(url));
     if (url[0] == '\0')
     {
-        ESP_LOGW(TAG, "relay.enabled is set but relay.url is empty — not connecting");
+        ESP_LOGW(TAG, "relay.enabled is set but relay.url is empty - not connecting");
         initAttempt.SetReady();
         return;
     }
@@ -133,7 +133,7 @@ void RelayManager::ResolveToken()
     {
         // Not fatal, but say so plainly: a token that is not stored is a new identity
         // on every boot, which means re-approving the device after every reboot.
-        ESP_LOGE(TAG, "failed to store relay.token — it will change on reboot");
+        ESP_LOGE(TAG, "failed to store relay.token - it will change on reboot");
         return;
     }
     ESP_LOGI(TAG, "generated a relay token for this device");
@@ -256,6 +256,13 @@ void RelayManager::SendHello()
         //  ───────────────────────────────────────────────────────────────────────
         {   "name",     name,                                true    },  // what a human calls this board; falls back to the project name
         {   "project",  app ? app->project_name : nullptr,   true    },  // the firmware's identity — which product this is
+        {   "desc",     strux_.getSystemManager().GetDescription(),
+                                                             false   },  // one line saying what this product IS, registered by the
+                                                                         // application (DeviceDoc.h). Optional: a fork that has not
+                                                                         // written one yet is a device with no description, not a
+                                                                         // broken hello. The LONG form is not here, it is served by
+                                                                         // `system describe` -- a README does not belong in a chunk
+                                                                         // every reconnect re-sends.
         {   "fw",       app ? app->version : nullptr,        true    },  // the git TAG (0.1.0), so two builds can share it
         {   "commit",   STRUX_GIT_COMMIT,                    false   },  // short sha + "-dirty", which is what tells those two apart.
                                                                          // Optional because a source drop with no .git is a legitimate
@@ -328,7 +335,7 @@ void RelayManager::TaskLoop()
                 // retrying a URL the parser already rejected would only reprint its
                 // complaint forever. Stop the task instead; the settings UI is where
                 // this gets fixed, and the fix takes effect on the next boot.
-                ESP_LOGE(TAG, "relay.url is not usable — not retrying until reboot");
+                ESP_LOGE(TAG, "relay.url is not usable - not retrying until reboot");
                 return;
             }
             if (result != RelaySocket::ConnectResult::Ok)
@@ -418,7 +425,7 @@ void RelayManager::OnConnected()
 
     // Says WHY the pipe is open, which is no longer "nobody set a password": this
     // interface authenticates by its own dial-out, so web.password never gated it.
-    ESP_LOGI(TAG, "Connected as '%s' (relay interface — authenticated by dialling out)",
+    ESP_LOGI(TAG, "Connected as '%s' (relay interface - authenticated by dialling out)",
              deviceId_);
 }
 
@@ -442,13 +449,13 @@ int RelayManager::ReportConnectFailure(RelaySocket::ConnectResult result)
         suppressedFailures_ = 0;
 
         if (result == RelaySocket::ConnectResult::Refused && status == 403)
-            ESP_LOGW(TAG, "relay refused this device — approve '%s' on the relay "
+            ESP_LOGW(TAG, "relay refused this device - approve '%s' on the relay "
                           "server; retrying every %ds",
                      deviceId_, REFUSED_DELAY_MS / 1000);
         else if (result == RelaySocket::ConnectResult::Refused)
             ESP_LOGW(TAG, "relay refused the upgrade with HTTP %d", status);
         else
-            ESP_LOGW(TAG, "cannot reach the relay at %s — retrying, backing off to %ds",
+            ESP_LOGW(TAG, "cannot reach the relay at %s - retrying, backing off to %ds",
                      uri_, RECONNECT_DELAY_MAX_MS / 1000);
     }
 
@@ -471,7 +478,7 @@ void RelayManager::OnDisconnected()
 
     // Nothing to unblock: a handler waiting for its next chunk is waiting on a read
     // of this same socket, on this same task, so it has already returned by now.
-    ESP_LOGW(TAG, "Disconnected — will retry");
+    ESP_LOGW(TAG, "Disconnected - will retry");
     vTaskDelay(pdMS_TO_TICKS(RECONNECT_DELAY_MS));
 }
 
@@ -578,7 +585,7 @@ bool RelayManager::BroadcastTelemetry(const char* line, int len)
     uint8_t buf[session::HEADER_LEN + 384];
     if (static_cast<size_t>(len) > sizeof(buf) - session::HEADER_LEN)
     {
-        ESP_LOGW(TAG, "telemetry line too long (%d) — dropped", len);
+        ESP_LOGW(TAG, "telemetry line too long (%d) - dropped", len);
         return false;
     }
 

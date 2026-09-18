@@ -221,8 +221,12 @@ RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
     char key[64] = {};
     char value[128] = {};
     RETURN_IF_ERROR(ctx.readArgs(
-        Required("key",   key),
-        Optional("value", value)
+        Required("key",   key,
+                 "The setting's dotted key exactly as 'settings list' reports it, "
+                 "e.g. 'relay.url' or 'led.enabled'."),
+        Optional("value", value,
+                 "The new value as text: numbers in decimal, booleans as 'true' or "
+                 "'false'. Omit it to clear the setting to an empty value.")
     ));
 
     auto resp = ctx.reply.object();

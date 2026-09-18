@@ -30,6 +30,18 @@ struct CommandEntry
     const char* name;
     RequestError (*handler)(void* ctx, CommandContext& c);
 
+    /// One line saying what this command DOES, in the vocabulary of whoever calls it.
+    ///
+    /// Optional and defaulted, so an existing table compiles unchanged — but a
+    /// command without one is a command an operator, or a model reaching this device
+    /// through the relay, can only guess at. The arguments describe themselves (see
+    /// ArgSpec::help); this is the sentence the arguments are arguments TO.
+    ///
+    /// A string literal, never composed: the table is static storage and nothing
+    /// frees it. Keep it short — a second sentence for a caveat is fine, a paragraph
+    /// belongs in the device's instructions (`system describe`).
+    const char* help = nullptr;
+
     // Managed by CommandManager::Register() — owners never touch these.
     void* ctx = nullptr;
     CommandEntry* next = nullptr;
@@ -44,7 +56,7 @@ struct CommandEntry
     ~CommandEntry()
     {
         if (registered)
-            FATAL("registered command '%s' destroyed — command tables must "
+            FATAL("registered command '%s' destroyed - command tables must "
                   "live for the whole application", name);
     }
 };

@@ -78,11 +78,24 @@ private:
     RequestError Cmd_ActivatePartition(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "partition", "status",   &InvokeCommand<&UpdateManager::Cmd_UpdateStatus> },
-        { "partition", "list",     &InvokeCommand<&UpdateManager::Cmd_Partitions> },
-        { "partition", "write",    &InvokeCommand<&UpdateManager::Cmd_WritePartition> },
-        { "partition", "clear",    &InvokeCommand<&UpdateManager::Cmd_ClearPartition> },
-        { "partition", "activate", &InvokeCommand<&UpdateManager::Cmd_ActivatePartition> },
-        { "partition", "read",     &InvokeCommand<&UpdateManager::Cmd_DownloadPartition> },
+        { "partition", "status",   &InvokeCommand<&UpdateManager::Cmd_UpdateStatus>,
+          "Report the running firmware version, which app slot it booted from, and "
+          "which slot the next update would be written to." },
+        { "partition", "list",     &InvokeCommand<&UpdateManager::Cmd_Partitions>,
+          "List the flash partitions with type, offset, size, and whether each is "
+          "running, is the next OTA slot, or may be written to." },
+        { "partition", "write",    &InvokeCommand<&UpdateManager::Cmd_WritePartition>,
+          "Write an image to a partition. The bytes follow the request envelope in "
+          "the same session, so this is a streaming upload rather than an argument. "
+          "Destructive: it overwrites what the device boots or serves." },
+        { "partition", "clear",    &InvokeCommand<&UpdateManager::Cmd_ClearPartition>,
+          "Erase a partition. Destructive and immediate - the running app slot is "
+          "refused, anything else is erased." },
+        { "partition", "activate", &InvokeCommand<&UpdateManager::Cmd_ActivatePartition>,
+          "Mark an app partition as the one to boot next. Takes effect at the next "
+          "reboot; an image that does not validate is refused." },
+        { "partition", "read",     &InvokeCommand<&UpdateManager::Cmd_DownloadPartition>,
+          "Read a partition back. The reply is a JSON header record, a newline, "
+          "then the raw partition bytes - which can be megabytes." },
     };
 };

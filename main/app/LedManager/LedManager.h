@@ -86,7 +86,11 @@ private:
     RequestError Cmd_Set(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "led", "get", &InvokeCommand<&LedManager::Cmd_Get> },
-        { "led", "set", &InvokeCommand<&LedManager::Cmd_Set> },
+        { "led", "get", &InvokeCommand<&LedManager::Cmd_Get>,
+          "Report the indicator: whether it is enabled, whether the relay link is up, "
+          "and whether the LED is lit right now." },
+        { "led", "set", &InvokeCommand<&LedManager::Cmd_Set>,
+          "Turn the relay-link indicator on or off. Persisted, so it survives a "
+          "reboot. Omitting 'enabled' leaves it as it is and just reports the state." },
     };
 };

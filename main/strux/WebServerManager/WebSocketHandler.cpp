@@ -231,7 +231,7 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
         // that was never coming — every command swallowed, nothing logged. Refuse the
         // session instead, so the failure lands at the caller rather than in a
         // timeout.
-        ESP_LOGW(TAG, "frame on fd=%d with no client slot — refusing session %u",
+        ESP_LOGW(TAG, "frame on fd=%d with no client slot - refusing session %u",
                  fd, (unsigned)sid);
         WsSessionLink link(req, sendMutex_);
         Session s(sid, link, sessionFrame_, SESSION_WINDOW,

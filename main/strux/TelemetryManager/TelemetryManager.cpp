@@ -216,14 +216,14 @@ void TelemetryManager::Point::Commit()
 
     if (fieldLen_ == 0)
     {
-        ESP_LOGW(TAG, "point '%s' has no fields — not sent", measurement_);
+        ESP_LOGW(TAG, "point '%s' has no fields - not sent", measurement_);
         return;
     }
     if (!ok_)
     {
         // Refused rather than truncated: half a line is either a parse error at the
         // server or, worse, a valid line missing a field.
-        ESP_LOGW(TAG, "point '%s' did not fit — not sent", measurement_);
+        ESP_LOGW(TAG, "point '%s' did not fit - not sent", measurement_);
         owner_->dropped_++;
         return;
     }
@@ -275,7 +275,7 @@ void TelemetryManager::Send(const char* measurement, const char* tags,
 
     if (n < 0 || static_cast<size_t>(n) >= sizeof(line))
     {
-        ESP_LOGW(TAG, "line for '%s' did not fit — not sent", measurement);
+        ESP_LOGW(TAG, "line for '%s' did not fit - not sent", measurement);
         dropped_++;
         return;
     }

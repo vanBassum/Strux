@@ -32,7 +32,7 @@ public:
         {
             overflowed_ = true;
             ESP_LOGE("BufferStream", "Overflow! capacity=%u, tried to write %u more (already %u). "
-                     "Output is truncated — increase the underlying buffer.",
+                     "Output is truncated - increase the underlying buffer.",
                      static_cast<unsigned>(cap_), static_cast<unsigned>(size),
                      static_cast<unsigned>(len_));
         }

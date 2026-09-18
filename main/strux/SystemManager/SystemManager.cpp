@@ -58,6 +58,12 @@ void SystemManager::DescribeCpu(char* out, size_t maxLen)
         snprintf(out, maxLen, "%d MHz", CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
 }
 
+void SystemManager::SetDocumentation(const char* description, const char* instructions)
+{
+    description_  = description;
+    instructions_ = instructions;
+}
+
 void SystemManager::GetDeviceName(char* out, size_t maxLen)
 {
     name_.Get(out, maxLen);
@@ -115,6 +121,33 @@ RequestError SystemManager::Cmd_Info(CommandContext& ctx)
     if (now.YearLocal() >= 2020)
         now.ToStringLocal(deviceTimeStr, sizeof(deviceTimeStr), "%F %T");
     resp.field("deviceTime", deviceTimeStr);
+    return RequestError::Ok;
+}
+
+RequestError SystemManager::Cmd_Describe(CommandContext& ctx)
+{
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    const esp_app_desc_t* app = esp_app_get_description();
+
+    char deviceName[48] = {};
+    GetDeviceName(deviceName, sizeof(deviceName));
+
+    auto resp = ctx.reply.object();
+    resp.field("ok", true);
+    resp.field("name", deviceName);
+    resp.field("project", app->project_name);
+    resp.field("firmware", app->version);
+    resp.field("commit", STRUX_GIT_COMMIT);
+
+    // Absent, not empty, when the application registered nothing: a reader can then
+    // tell a device that has no instructions from one whose instructions are blank.
+    // The strings stream straight to the transport — nothing here buffers a README.
+    if (description_ != nullptr && description_[0] != '\0')
+        resp.field("description", description_);
+    if (instructions_ != nullptr && instructions_[0] != '\0')
+        resp.field("instructions", instructions_);
+
     return RequestError::Ok;
 }
 

@@ -82,7 +82,7 @@ const char* PartitionWriter::Activate(const char* label)
     {
         // Data partitions have no boot pointer; succeeding keeps the caller's
         // sequence uniform (clear → write → activate) whatever it is uploading.
-        ESP_LOGI(TAG, "'%s' is a data partition — nothing to activate", label);
+        ESP_LOGI(TAG, "'%s' is a data partition - nothing to activate", label);
         return nullptr;
     }
 

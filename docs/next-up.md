@@ -5,15 +5,28 @@ lands or is dropped — never ticked off in place. Everything else lives in
 GitHub issues (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
-Last updated 2026-09-17.
+Last updated 2026-09-18.
 
 ## Now
+
+**A device describes itself, and an agent can drive it through the relay.** Commands
+carry a one-line description and describe each argument; `help describe` returns the
+whole registry in one reply and `system describe` returns the product's own description
+and instructions (`main/app/DeviceDoc.h`). The relay exposes three generic tools at
+`/mcp` — `devices`, `describe`, `execute` — gated by a per-device switch on its
+dashboard, and knows nothing about any device.
+→ [`reasoning/…a-device-that-describes-itself…`](reasoning/2026-09-18-10h50-a-device-that-describes-itself-needs-no-tool-of-its-own.md)
 
 **The frontend lives in the app image, and the `www` partition is gone.** `www/` is
 packed into one blob (`main/strux/WebAssets/`) and linked in with `EMBED_FILES`; the FAT
 mount, the `fatfs`/`wear_levelling` components and the per-file `.gz` step are all
 deleted. Both OTA slots grew to 0x1F0000 and fill the 4 MB flash exactly.
 → [`reasoning/…the-ui-was-a-second-deliverable…`](reasoning/2026-09-17-10h05-the-ui-was-a-second-deliverable-and-a-partition-is-what-made-it-one.md)
+
+**Outstanding: the relay's MCP endpoint has no auth of its own.** It sits beside the
+dashboard, so in production it is behind Authentik like everything but `/device` — right
+for a browser, awkward for an MCP client. Whether that wants a token, a proxy exception
+or nothing at all has not been decided.
 
 **Outstanding: two bench checks the wire cannot answer.** A devkit on COM3 is flashed
 and driven (0.0.8 at 192.168.50.202): the new table boots, `partition status`/`list`
@@ -25,8 +38,8 @@ feed both work. What is left needs eyes and a second machine:
   page (two-column card grid, category chip row) laying out as intended.
 - **The relay path** — `relay.url` on the bench devkit points at
   `ws://192.168.50.109:8080/device`, which refuses the connection, so the relay has
-  never served this build. That is also why the LED is dark: `IsConnected()` is false,
-  correctly.
+  never served this build. (A *second* C3, `esp32-50787d83db6c`, has been driven through
+  a local relay end to end for the MCP work, so the path itself is proven.)
 
 **Outstanding: `system info` reports `idf` as `-128-NOTFOUND`.** Both the boot banner
 and the hello field carry it, so the relay records garbage for an optional field the

@@ -121,7 +121,9 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
     // First handler on the pull contract: no envelope handling, no JsonReader, and
     // it will keep working unchanged when the request format stops being JSON.
     char path[192] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("path", path)));
+    RETURN_IF_ERROR(ctx.readArgs(Required("path", path,
+        "Path of the file within the device's web assets, e.g. 'index.html' or "
+        "'assets/index.js'. An empty path or a directory resolves to index.html.")));
 
     StaticFileHandler::Resolved file;
     const bool found = StaticFileHandler::Resolve(path, file);
@@ -184,7 +186,9 @@ RequestError WebServerManager::Cmd_AuthHello(CommandContext& ctx)
 RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
 {
     char password[64] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Optional("password", password)));
+    RETURN_IF_ERROR(ctx.readArgs(Optional("password", password,
+        "The device's web password (setting 'web.password'). Omit it only to test "
+        "whether an empty password is accepted.")));
 
     auto resp = ctx.reply.object();
 
@@ -208,7 +212,8 @@ RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
 RequestError WebServerManager::Cmd_AuthResume(CommandContext& ctx)
 {
     char key[SessionTable::TOKEN_LEN] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("key", key)));
+    RETURN_IF_ERROR(ctx.readArgs(Required("key", key,
+        "The session key a previous successful 'auth login' returned.")));
 
     auto resp = ctx.reply.object();
 

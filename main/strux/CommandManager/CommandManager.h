@@ -104,6 +104,19 @@ private:
     //     help list -category partition -command write → that command's arguments
     RequestError Cmd_Help(CommandContext& ctx);
 
+    // ── help describe: the whole registry, in one reply ───────
+    //
+    // What `help list` gives a human exploring, given instead to something that has
+    // to compose a call without asking again: every category, every command, its
+    // one-line description and its full argument declarations, in one round trip.
+    //
+    // The same facts as walking `help list` N+1 times, and deliberately the same
+    // MECHANISM — the chain for the routes, the handler itself for the arguments —
+    // so there is still nothing to keep in step. What it saves is a round trip per
+    // command, which over a relay pipe is the difference between describing a device
+    // once and describing it twenty times.
+    RequestError Cmd_Describe(CommandContext& ctx);
+
     static constexpr size_t MAX_ROUTE = 32;        // matches protocol::MAX_COMMAND_NAME
     static constexpr size_t MAX_CATEGORIES = 24;
 
@@ -112,7 +125,23 @@ private:
     RequestError DescribeCommand(const char* category, const char* command,
                                  ReplyWriter& reply);
 
+    /// Writes one command's declared arguments into `args`, by re-dispatching it with
+    /// a reader that prints declarations instead of filling them. Returns false when
+    /// the handler never asked for its arguments — which means its body ran, and is
+    /// the caller's cue to say so.
+    bool DescribeArguments(const CommandEntry& entry, ReplyArray& args);
+
+    /// Collects the distinct categories on the chain into `out`. Caller holds the
+    /// mutex. Returns how many were found; `truncated` says the chain had more than
+    /// MAX_CATEGORIES of them.
+    size_t CollectCategories(const char** out, size_t cap, bool& truncated);
+
     inline static CommandEntry commands_[] = {
-        { "help", "list", &InvokeCommand<&CommandManager::Cmd_Help> },
+        { "help", "list",     &InvokeCommand<&CommandManager::Cmd_Help>,
+          "List the device's command categories, one category's commands, or one "
+          "command's arguments." },
+        { "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
+          "Describe every command this firmware offers - category, name, description "
+          "and full argument declarations - in one reply." },
     };
 };

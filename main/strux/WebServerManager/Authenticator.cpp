@@ -19,7 +19,7 @@ void Authenticator::CheckPasswordEpoch()
     password_.Get(current, sizeof(current));
     if (strcmp(current, passwordSnapshot_) != 0)
     {
-        ESP_LOGI(TAG, "password changed — clearing all sessions");
+        ESP_LOGI(TAG, "password changed - clearing all sessions");
         sessions_.Clear();
         strlcpy(passwordSnapshot_, current, sizeof(passwordSnapshot_));
     }
