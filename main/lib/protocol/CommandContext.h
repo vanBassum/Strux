@@ -5,6 +5,24 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace protocol
+{
+    // The envelope line, bounding the request but NOT the body - bodies stream.
+    //
+    // ONE constant, because there used to be two. The router had 128 and the
+    // argument reader had 512, so a command could declare arguments that made an
+    // envelope it could never be routed with: the router copies only its own
+    // buffer's worth before looking for "type", and an envelope whose "type"
+    // landed past byte 127 was refused with "expected: <category> <command>" -
+    // a message about the route, for a fault in the length. Six ordinary
+    // arguments were enough to cross it.
+    //
+    // Both buffers are stack, on the task running the command, and they are not
+    // live at the same time: the router's frame is gone before a handler builds
+    // its reader.
+    inline constexpr size_t MAX_ENVELOPE = 512;
+}
+
 // Everything a command handler gets: its arguments, its request body, its reply.
 //
 //     RequestError Cmd_Read(CommandContext& ctx)
@@ -55,7 +73,7 @@ enum class RequestError : uint8_t
     Described,
 };
 
-enum class ArgType : uint8_t { String, UInt32, Bool };
+enum class ArgType : uint8_t { String, UInt32, Int32, Bool };
 
 /// One declared argument: where to put it and whether it may be absent. Type-erased
 /// on purpose — the variadic layer builds an array of these and hands it to one
@@ -83,11 +101,13 @@ struct ArgSpec
 template <size_t N>
 inline ArgSpec Required(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, true, help }; }
 inline ArgSpec Required(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, true, help }; }
+inline ArgSpec Required(const char* name, int32_t& dst, const char* help = nullptr)   { return { name, &dst, 0, ArgType::Int32,  true, help }; }
 inline ArgSpec Required(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   true, help }; }
 
 template <size_t N>
 inline ArgSpec Optional(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, false, help }; }
 inline ArgSpec Optional(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, false, help }; }
+inline ArgSpec Optional(const char* name, int32_t& dst, const char* help = nullptr)   { return { name, &dst, 0, ArgType::Int32,  false, help }; }
 inline ArgSpec Optional(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   false, help }; }
 
 /// Reads a request's arguments off a stream. One implementation per wire format; a

@@ -18,7 +18,7 @@
 // for now — would convert every command at once without touching a handler.
 class JsonArgReader final : public ArgReader
 {
-    static constexpr size_t MAX_ENVELOPE = 512;
+    static constexpr size_t MAX_ENVELOPE = protocol::MAX_ENVELOPE;
     static constexpr size_t MAX_VALUE    = 192;
 
 public:
@@ -99,6 +99,19 @@ private:
             const unsigned long v = strtoul(value, &end, 0);   // 0 → accepts 0x…
             if (end == value || *end != '\0') { failed_ = s.name; return RequestError::MalformedNumber; }
             *static_cast<uint32_t*>(s.dst) = static_cast<uint32_t>(v);
+            return RequestError::Ok;
+        }
+
+        case ArgType::Int32:
+        {
+            // strtol, not strtoul: a calibration offset is legitimately negative
+            // (the printer's first raster line can land past the label's leading
+            // edge), and an unsigned argument would have to encode that in the
+            // caller, which is where a sign convention goes to be got wrong.
+            char* end = nullptr;
+            const long v = strtol(value, &end, 0);   // 0 -> accepts 0x...
+            if (end == value || *end != '\0') { failed_ = s.name; return RequestError::MalformedNumber; }
+            *static_cast<int32_t*>(s.dst) = static_cast<int32_t>(v);
             return RequestError::Ok;
         }
 
