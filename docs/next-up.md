@@ -15,10 +15,13 @@ whole registry in one reply and `system describe` returns the product's own desc
 and instructions (`main/app/DeviceDoc.h`). The relay exposes three generic tools at
 `/mcp` — `devices`, `describe`, `execute` — gated by a per-device switch on its
 dashboard, and knows nothing about any device. Live at `https://strux.vanbassum.com/mcp`
-(relay v0.4.1), routed past Authentik and holding its own bearer token, and driven end to
-end from outside: a real board answered `system ping` through it.
+(relay v0.6.1), routed past Authentik: bearer tokens are managed on the relay's own MCP
+page, and a client that cannot carry one -- ChatGPT -- gets its own through the relay's
+OAuth 2.1 flow, whose consent page is the only step still behind Authentik. A real board
+answered `system ping` through it from outside.
 → [`reasoning/…a-device-that-describes-itself…`](reasoning/2026-09-18-10h50-a-device-that-describes-itself-needs-no-tool-of-its-own.md),
-[`reasoning/…forward-auth-is-for-people…`](reasoning/2026-09-18-11h15-forward-auth-is-for-people-so-a-machine-endpoint-has-to-carry-its-own-credential.md)
+[`reasoning/…forward-auth-is-for-people…`](reasoning/2026-09-18-11h15-forward-auth-is-for-people-so-a-machine-endpoint-has-to-carry-its-own-credential.md),
+[`reasoning/…the-proxy-already-knows-who-the-human-is…`](reasoning/2026-09-18-12h20-the-proxy-already-knows-who-the-human-is-so-the-relay-can-run-oauth-without-users.md)
 
 **The frontend lives in the app image, and the `www` partition is gone.** `www/` is
 packed into one blob (`main/strux/WebAssets/`) and linked in with `EMBED_FILES`; the FAT
