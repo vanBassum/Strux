@@ -26,6 +26,35 @@ interface PendingRequest {
   onData?: (received: number) => void
 }
 
+/** Per-call options for `send`. A strict subset of what `awaitReply` takes: the
+ *  binary-reply machinery stays private, because `send<T>` resolves with parsed
+ *  JSON and a caller asking for bytes wants `readFile`, not a flag.
+ *
+ *  `M` is the progress record's shape. It defaults to `Record<string, unknown>`
+ *  so `send<Result>(...)` is unchanged, and a caller who knows the shape can
+ *  write `send<Result, Progress>(...)` instead of narrowing in the callback. */
+export interface SendOptions<M = Record<string, unknown>> {
+  /** Bounds SILENCE, not total transfer time - each chunk restarts it. Default
+   *  10 s, which is short for anything that writes flash. */
+  timeoutMs?: number
+
+  /** Called for every NON-final reply chunk.
+   *
+   *  Passing this CHANGES HOW THE REPLY IS READ, and that is not a detail a
+   *  caller can ignore. Without it, chunks are concatenated and parsed once at
+   *  FINAL, so a reply of any size works. With it, EVERY CHUNK IS PARSED AS ITS
+   *  OWN COMPLETE JSON RECORD - which is right for a command that emits one
+   *  record per chunk (`partition write` reports {"p":<bytes>} as it goes), and
+   *  wrong for an ordinary command whose single reply happens to be longer than
+   *  the transport's reply window, where each piece is a fragment and parses as
+   *  nothing.
+   *
+   *  The transport cannot tell the two apart, because a reply does not say which
+   *  shape it is - the same gap as #32. So this is the caller's judgement: pass
+   *  it only for a command documented to stream records. */
+  onMessage?: (msg: M) => void
+}
+
 /** Thrown when an upload was cancelled from the UI. A distinct type because a
  *  cancel is not a failure and must not be reported as one. */
 export class UploadCancelled extends Error {
@@ -424,6 +453,8 @@ class BackendService {
       onData?: (received: number) => void
     } = {},
   ): Promise<T> {
+    // `?? 10000` and not a default parameter, because callers forward an
+    // optional straight through and undefined has to mean "unset", not "zero".
     const timeoutMs = opts.timeoutMs ?? 10000
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -456,22 +487,27 @@ class BackendService {
     }, req.timeoutMs)
   }
 
-  async send<T>(
+  async send<T, M = Record<string, unknown>>(
     type: string,
     params: Record<string, unknown> = {},
+    opts: SendOptions<M> = {},
   ): Promise<T> {
-    return this.enqueue(() => this.sendUnqueued<T>(type, params))
+    return this.enqueue(() => this.sendUnqueued<T, M>(type, params, opts))
   }
 
   /** One command, WITHOUT taking a queue slot. Only for a caller that already
    *  holds one — see the deadlock note on `enqueue`. */
-  private async sendUnqueued<T>(
+  private async sendUnqueued<T, M = Record<string, unknown>>(
     type: string,
     params: Record<string, unknown> = {},
+    opts: SendOptions<M> = {},
   ): Promise<T> {
     await this.ensureConnected()
     const session = this.allocSession()
-    const reply = this.awaitReply<T>(session)
+    const reply = this.awaitReply<T>(session, {
+      timeoutMs: opts.timeoutMs,
+      onMessage: opts.onMessage as ((msg: Record<string, unknown>) => void) | undefined,
+    })
     // Request = one FINAL session chunk: the command JSON + '\n' (the device
     // splits the header line from any body; these commands have no body).
     const body = new TextEncoder().encode(JSON.stringify({ type, ...params }) + "\n")
