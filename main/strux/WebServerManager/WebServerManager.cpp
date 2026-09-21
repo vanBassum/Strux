@@ -12,6 +12,20 @@
 #include <esp_log.h>
 
 static constexpr const char* TAG = "WebServerManager";
+
+// The manager, reachable from a C callback that carries no context of its own.
+//
+// `httpd_config_t::close_fn` is a plain function pointer with signature
+// `(httpd_handle_t, int fd)` — no user pointer, unlike every other callback here,
+// which is why this one alone needs a static and `SetBroadcastCallback` below does
+// not. A capturing lambda cannot convert to that pointer, so the `this` has to come
+// from somewhere outside the call.
+//
+// Safe in practice for the reason a singleton usually is not: there is exactly one
+// WebServerManager, it is owned by StruxContext for the life of the process, and
+// `Init()` is guarded by an InitState — so the pointer is written once, before the
+// server that would call it exists, and never dangles. Checked for null anyway,
+// because the httpd task can outlive a failed Init.
 static WebServerManager* s_instance_ = nullptr;
 
 WebServerManager::WebServerManager(StruxProvider& strux)
