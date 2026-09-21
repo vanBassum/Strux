@@ -67,10 +67,16 @@ class Channel : public Stream
     size_t   cap_;        // payload capacity (buf_ size minus HEADER_LEN)
     size_t   outLen_ = 0; // payload bytes buffered so far
     bool     failed_ = false;
+    bool     reset_ = false;  // the peer terminated this channel mid-request
 
     // Frame [id|flags|payload] into buf_ and send it; reset the payload cursor.
     void emitChunk(uint8_t flags)
     {
+        // A channel the peer has RESET is over in both directions. Writing to it
+        // would put frames on the wire for an id that no longer means anything,
+        // and on a relay those get mapped to whoever holds that id next.
+        if (reset_) { outLen_ = 0; return; }
+
         channel::writeHeader(buf_, id_, flags);
         if (!link_.SendRaw(buf_, channel::HEADER_LEN + outLen_)) failed_ = true;
         outLen_ = 0;
@@ -95,6 +101,24 @@ class Channel : public Stream
                 ESP_LOGE("Channel", "read failed after %u bytes: n=%d (channel %u)",
                          static_cast<unsigned>(consumed_), n,
                          static_cast<unsigned>(id_));
+                failed_ = true;
+                return false;
+            }
+            if (sid == id_ && (flags & channel::FLAG_RESET))
+            {
+                // The peer gave up on this request: a cancelled upload, an aborted
+                // command. It is NOT an end of stream -- a handler that reads 0 and
+                // concludes "complete" would commit a truncated image -- so this
+                // sets failed_, which is the flag anything needing all of its input
+                // already has to ask about.
+                //
+                // Reading it as body bytes instead is what a half-duplex reader
+                // would do, and it wedges: the handler waits for a FINAL that by
+                // definition is not coming, and the channel stays Active until the
+                // transport itself gives up.
+                ESP_LOGI("Channel", "channel %u reset by the peer after %u bytes",
+                         static_cast<unsigned>(id_), static_cast<unsigned>(consumed_));
+                reset_ = true;
                 failed_ = true;
                 return false;
             }
@@ -225,6 +249,10 @@ public:
     /// needs *all* of its input has to ask. An override, so a handler holding only a
     /// `Stream&` can ask too.
     bool failed() const override { return failed_; }
+
+    /// Did the peer RESET this channel, as opposed to the transport breaking? The
+    /// difference matters to the caller that has to decide whether to log a fault.
+    bool wasReset() const { return reset_; }
     uint16_t id() const { return id_; }
 
     /// Did the request reach its FINAL chunk? A handler can return before that —

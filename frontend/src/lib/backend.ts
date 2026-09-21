@@ -41,15 +41,28 @@ type AuthHandler = (authenticated: boolean) => void
 
 // ── Service ──────────────────────────────────────────────────────
 
-// Session ids correlate a reply with its request. The device is single-in-flight
-// (one active session at a time), so opens are SERIALIZED through a FIFO queue
-// (see `enqueue`): callers still fire concurrently, but only one session is open
-// on the wire at once, and the next starts on the previous reply's FINAL. Ids
-// stay within 16 bits to match the wire.
-let nextSession = 1
-
+// The browser is a PEER, not a client. It handshakes, owns half the channel-id
+// space, opens channels from it, and accepts channels the device opens at it.
+//
+// The device is still single-in-flight, so opens are SERIALIZED through a FIFO
+// queue (see `enqueue`): callers fire concurrently, one channel is active on the
+// wire at a time, and the next starts on the previous reply's FINAL. That is
+// policy, not protocol - the wire would carry several at once.
 const FLAG_FINAL = 0x01
-const FLAG_REJECT = 0x02
+const FLAG_RESET = 0x02
+const FLAG_OPEN = 0x04
+const FLAG_CONTROL = 0x08
+
+const PROTOCOL_VERSION = 1
+const MAX_HANDSHAKE_ATTEMPTS = 3
+
+// Two contiguous halves; the handshake decides which is ours. Nothing is
+// reserved - channel 0 is an ordinary id, and CONTROL frames merely write it and
+// have it ignored.
+const LOW_BASE = 0x0000
+const LOW_LIMIT = 0x8000
+const HIGH_BASE = 0x8000
+const HIGH_LIMIT = 0x10000
 
 // The device UI runs in two places, and its WebSocket follows the page:
 //   • served by the device            → ws://<device>/ws
@@ -79,6 +92,16 @@ class BackendService {
   // Tail of the open-serialization queue. Each enqueued task runs only after the
   // previous one has fully settled (its reply's FINAL received, or it failed).
   private queue: Promise<unknown> = Promise.resolve()
+
+  // ── Connection state (reset on every socket) ──────────────────────────────
+  private ready = false
+  private readyWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = []
+  private nonce = 0n
+  private handshakeAttempts = 0
+  private lowHalf = false
+  private nextChannel = 0
+  // Channels the DEVICE opened at us, by id, with the name from its envelope.
+  private theirChannels = new Map<number, string>()
   private _status: ConnectionStatus = "disconnected"
   private token: string | null = sessionStorage.getItem(TOKEN_KEY)
   private authHandlers = new Set<AuthHandler>()
@@ -135,8 +158,11 @@ class BackendService {
     this.ensureConnected().catch(() => {})
   }
 
+  // "Connected" means the channel layer is up, not that the socket opened. A
+  // command sent between those two points would be dropped by the device, which
+  // refuses channel traffic before READY.
   private ensureConnected(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) return Promise.resolve()
+    if (this.ws?.readyState === WebSocket.OPEN && this.ready) return Promise.resolve()
     if (this.connecting) return this.connecting
     return this.doConnect()
   }
@@ -158,9 +184,21 @@ class BackendService {
       ws.onopen = () => {
         opened = true
         this.ws = ws
-        this.setStatus("connected")
-        void this.doHandshake()   // establishes auth in-band; sets authenticated
-        resolve()
+        // Ours goes out unprompted; the device's is already on its way. Nothing
+        // else may be sent until both have landed, which is why resolve() waits
+        // on whenReady() rather than on the socket.
+        this.resetConnectionState()
+        this.sendHandshake()
+        this.whenReady().then(
+          () => {
+            this.setStatus("connected")
+            void this.doAuth()   // in-band auth, once the channel layer is up
+            resolve()
+          },
+          (err) => {
+            reject(err instanceof Error ? err : new Error("handshake failed"))
+          },
+        )
       }
 
       ws.onmessage = (ev) => {
@@ -177,6 +215,8 @@ class BackendService {
         this.ws = null
         this.stopHeartbeat()
         this.setStatus("disconnected")
+        this.failHandshakeWaiters(new Error("WebSocket closed"))
+        this.resetConnectionState()
         // Keep `authenticated` as-is across a brief drop — the reconnect's
         // auth{key} either resumes silently or fails (then doHandshake shows login).
         for (const [, req] of this.pending) {
@@ -200,10 +240,11 @@ class BackendService {
     return p
   }
 
-  // Establish auth in-band right after the socket opens: hello tells us whether
-  // auth is required; if so, resume with the stored key or fall back to the
-  // login page. Runs on every (re)connect.
-  private async doHandshake() {
+  // Auth, in band, once the channel layer is READY: `auth hello` says whether a
+  // password is set; if so, resume with the stored key or fall back to the login
+  // page. Runs on every (re)connect. Named apart from the CONNECTION handshake
+  // above, which is a different thing that used to share the word.
+  private async doAuth() {
     try {
       const info = await this.send<{ authRequired: boolean }>("auth hello")
       if (!info.authRequired) {
@@ -264,10 +305,100 @@ class BackendService {
     return run
   }
 
+  /** Next free id in our half, skipping anything still in flight. */
   private allocSession(): number {
-    const session = nextSession
-    nextSession = nextSession >= 0xffff ? 1 : nextSession + 1
-    return session
+    const base = this.lowHalf ? LOW_BASE : HIGH_BASE
+    const limit = this.lowHalf ? LOW_LIMIT : HIGH_LIMIT
+    for (let i = 0; i < limit - base; i++) {
+      const id = this.nextChannel
+      this.nextChannel = id + 1 >= limit ? base : id + 1
+      if (!this.pending.has(id) && !this.theirChannels.has(id)) return id
+    }
+    throw new Error("no free channel ids")
+  }
+
+  private drawNonce(): bigint {
+    const a = new BigUint64Array(1)
+    crypto.getRandomValues(a)
+    return a[0]
+  }
+
+  /** Our half of the handshake, sent unprompted the moment the socket opens. */
+  private sendHandshake(mixIn = 0n) {
+    this.nonce = (this.drawNonce() ^ mixIn) & 0xffffffffffffffffn
+    this.handshakeAttempts++
+    const body = new Uint8Array(9)
+    body[0] = PROTOCOL_VERSION
+    let v = this.nonce
+    for (let i = 0; i < 8; i++) {
+      body[1 + i] = Number(v & 0xffn)
+      v >>= 8n
+    }
+    // Channel 0 by convention, ignored on receipt.
+    this.sendChunk(0, FLAG_CONTROL, body)
+  }
+
+  private onControl(body: Uint8Array) {
+    if (body.length < 9) return
+
+    if (this.ready) {
+      // The device restarted underneath us. Drop what we thought we knew and
+      // handshake again rather than talking about channels it has forgotten.
+      this.resetConnectionState()
+      this.sendHandshake()
+    }
+
+    const version = body[0]
+    if (version !== PROTOCOL_VERSION) {
+      this.failHandshake(
+        new Error(`device speaks protocol ${version}, this UI speaks ${PROTOCOL_VERSION}`),
+      )
+      return
+    }
+
+    let peer = 0n
+    for (let i = 7; i >= 0; i--) peer = (peer << 8n) | BigInt(body[1 + i])
+
+    if (peer === this.nonce) {
+      if (this.handshakeAttempts >= MAX_HANDSHAKE_ATTEMPTS) {
+        this.failHandshake(new Error("handshake nonce collision"))
+        return
+      }
+      // Mix the peer's nonce in so two identical draws diverge.
+      this.sendHandshake(peer)
+      return
+    }
+
+    this.lowHalf = this.nonce > peer
+    this.nextChannel = this.lowHalf ? LOW_BASE : HIGH_BASE
+    this.ready = true
+    for (const w of this.readyWaiters) w.resolve()
+    this.readyWaiters = []
+  }
+
+  private failHandshake(err: Error) {
+    this.failHandshakeWaiters(err)
+    this.ws?.close()
+  }
+
+  private failHandshakeWaiters(err: Error) {
+    for (const w of this.readyWaiters) w.reject(err)
+    this.readyWaiters = []
+  }
+
+  private resetConnectionState() {
+    this.ready = false
+    this.nonce = 0n
+    this.handshakeAttempts = 0
+    this.lowHalf = false
+    this.nextChannel = 0
+    this.theirChannels.clear()
+  }
+
+  /** Resolves once the handshake has settled. Nothing may be sent before it. */
+  private whenReady(): Promise<void> {
+    if (this.ready) return Promise.resolve()
+    return new Promise((resolve, reject) => this.readyWaiters.push({ resolve, reject }))
   }
 
   // Send one session chunk: [session:u16 LE | flags | payload].
@@ -344,35 +475,67 @@ class BackendService {
     // Request = one FINAL session chunk: the command JSON + '\n' (the device
     // splits the header line from any body; these commands have no body).
     const body = new TextEncoder().encode(JSON.stringify({ type, ...params }) + "\n")
-    this.sendChunk(session, FLAG_FINAL, body)
+    // OPEN|FINAL: the whole request in one frame, and our direction closed with it.
+    this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, body)
     return reply
   }
 
-  // Reassemble a reply from its session chunks. Each chunk is
-  // [session:u16 LE | flags | payload]; FLAG_FINAL ends the reply, FLAG_REJECT
-  // is a transport/framework refusal whose payload is the reason.
+  // Reassemble a reply from its channel frames. Each frame is
+  // [channel:u16 LE | flags | payload]; FLAG_FINAL ends a direction, FLAG_RESET
+  // terminates the channel and its payload is the reason.
   private onBinaryChunk(data: ArrayBuffer) {
     const view = new Uint8Array(data)
     if (view.length < 3) return
     const session = view[0] | (view[1] << 8)
     const flags = view[2]
 
-    // Session 0 is reserved for device-initiated broadcasts (log lines).
-    if (session === 0) {
+    // Connection-level. The channel id is written as 0 and means nothing here.
+    if (flags & FLAG_CONTROL) {
+      this.onControl(view.subarray(3))
+      return
+    }
+
+    // A channel the DEVICE opened at us. Nothing is reserved any more: it names
+    // itself in the envelope on its OPEN frame, exactly as a command does, and
+    // what used to be "session 0 is logs" is now "this channel said it is logs".
+    if (flags & FLAG_OPEN && !this.pending.has(session)) {
+      let name = ""
       try {
-        this.broadcastHandlers.forEach((fn) => fn(JSON.parse(new TextDecoder().decode(view.subarray(3)))))
+        name = String(JSON.parse(new TextDecoder().decode(view.subarray(3)).trim()).type ?? "")
       } catch {
-        /* malformed broadcast — ignore */
+        /* unreadable envelope: refuse below */
+      }
+      if (name === "log stream") {
+        this.theirChannels.set(session, name)
+      } else {
+        // Silence is acceptance, so a refusal has to be said. RESET is it.
+        this.sendChunk(session, FLAG_RESET, new TextEncoder().encode("unknown stream"))
       }
       return
     }
 
-    // No matching request: a reply to something that already timed out, or a
-    // chunk for a session this client never opened. Dropping it is the whole
-    // handling — there is nobody left to give it to.
+    const theirs = this.theirChannels.get(session)
+    if (theirs !== undefined) {
+      if (flags & FLAG_RESET) {
+        this.theirChannels.delete(session)
+        return
+      }
+      if (theirs === "log stream") {
+        try {
+          const msg = JSON.parse(new TextDecoder().decode(view.subarray(3)))
+          this.broadcastHandlers.forEach((fn) => fn(msg))
+        } catch {
+          /* malformed record: ignore */
+        }
+      }
+      return
+    }
+
+    // No matching request: a reply to something that already timed out, or
+    // residue from a channel that has closed. Dropping it is the whole handling.
     const req = this.pending.get(session)
     if (!req) return
-    if (flags & FLAG_REJECT) {
+    if (flags & FLAG_RESET) {
       this.pending.delete(session)
       clearTimeout(req.timer)
       req.reject(new Error(new TextDecoder().decode(view.subarray(3)) || "rejected"))
@@ -552,7 +715,8 @@ class BackendService {
       const envelope = new TextEncoder().encode(
         JSON.stringify({ type, ...(params ?? {}) }) + "\n",
       )
-      this.sendChunk(session, 0, envelope)
+      // OPEN, not FINAL: the body follows on the same channel.
+      this.sendChunk(session, FLAG_OPEN, envelope)
 
       // CHUNK matches the device's inbound window: a larger frame is refused, not
       // split.
@@ -620,7 +784,8 @@ class BackendService {
       // rejects a single-word type outright, so "writePartition" never reached the
       // handler — every upload from this page was refused before it started.
       const envelope = new TextEncoder().encode(JSON.stringify({ type: "partition write", partition }) + "\n")
-      this.sendChunk(session, 0, envelope)
+      // OPEN, not FINAL: the body follows on the same channel.
+      this.sendChunk(session, FLAG_OPEN, envelope)
 
       // Body chunks. CHUNK matches the device's inbound window (see WebSocketHandler).
       const CHUNK = 4096
@@ -628,12 +793,16 @@ class BackendService {
       while (sent < total) {
         if (signal?.aborted) {
           // Stopping mid-body cannot just stop: the device is blocked reading
-          // this session and would wait for a FINAL that is never coming, and a
-          // FINAL sent early would be read as a COMPLETE upload — a truncated
-          // image that passes for a whole one. Dropping the socket is what ends
-          // it honestly: the device's read fails, `partition write` reports the
-          // failure, and the boot slot was never touched anyway.
-          this.ws?.close()
+          // this channel and would wait for a FINAL that is never coming, and a
+          // FINAL sent early would be read as a COMPLETE upload - a truncated
+          // image that passes for a whole one.
+          //
+          // This used to drop the whole socket, because there was no way to say
+          // "this one is over" without saying "this one finished". RESET is that
+          // way: the device's read fails, `partition write` reports it, the boot
+          // slot was never touched, and every other channel on the connection is
+          // untouched too.
+          this.sendChunk(session, FLAG_RESET, new TextEncoder().encode("cancelled"))
           throw new UploadCancelled()
         }
         const end = Math.min(sent + CHUNK, total)
@@ -710,7 +879,7 @@ class BackendService {
       const body = new TextEncoder().encode(
         JSON.stringify({ type, ...(params ?? {}) }) + "\n",
       )
-      this.sendChunk(session, FLAG_FINAL, body)
+      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, body)
       return reply
     })
 
@@ -754,7 +923,7 @@ class BackendService {
       })
       // Request = one FINAL chunk: the command envelope, no body.
       const body = new TextEncoder().encode(JSON.stringify({ type: "partition read", partition: label }) + "\n")
-      this.sendChunk(session, FLAG_FINAL, body)
+      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, body)
       return reply
     })
 
