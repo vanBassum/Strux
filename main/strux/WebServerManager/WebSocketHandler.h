@@ -54,7 +54,7 @@ private:
     void TouchClient(int fd);
 
     /// False when the client table is full (after reaping stale un-authed slots).
-    bool AddWsClient(int fd, ConsoleManager& console);
+    bool AddWsClient(httpd_req_t* req, ConsoleManager& console);
 
     // Channel reply flush window (off the httpd-task stack; reused, single
     // channel at a time). NOT payload-proportional — a small batch buffer that

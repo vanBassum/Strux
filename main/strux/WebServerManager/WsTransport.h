@@ -70,3 +70,39 @@ public:
         return static_cast<int>(f.len - channel::HEADER_LEN);
     }
 };
+
+// The same wire, addressed by fd instead of by request.
+//
+// WsTransport wraps the httpd_req_t of the call it was built in, which is what a
+// handler has. The log pump has no request -- it runs on its own task and walks
+// the connection registry -- so it addresses each socket the way httpd allows from
+// outside a handler, with the async send. Receiving is not part of this: the pump
+// only ever pushes.
+class WsPumpTransport : public Transport
+{
+    static constexpr const char* TAG = "WsPumpTransport";
+
+    httpd_handle_t server_;
+    int fd_;
+    IMutex& sendMutex_;
+
+public:
+    WsPumpTransport(httpd_handle_t server, int fd, IMutex& sendMutex)
+        : server_(server), fd_(fd), sendMutex_(sendMutex) {}
+
+    bool SendRaw(const uint8_t* frame, size_t len) override
+    {
+        httpd_ws_frame_t f = {};
+        f.type = HTTPD_WS_TYPE_BINARY;
+        f.payload = const_cast<uint8_t*>(frame);
+        f.len = len;
+
+        LOCK(sendMutex_);
+        return httpd_ws_send_frame_async(server_, fd_, &f) == ESP_OK;
+    }
+
+    int RecvChunk(uint8_t*, size_t, uint16_t*, uint8_t*) override
+    {
+        return -1;   // push only
+    }
+};

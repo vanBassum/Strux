@@ -1,10 +1,15 @@
 #pragma once
 
 #include "Channel.h"
-#include "ChannelTable.h"
 #include "ChannelProtocol.h"
+#include "ChannelTable.h"
+#include "ConnectionState.h"
 #include "CommandEnvelope.h"
 #include "Transport.h"
+
+#include "esp_log.h"
+#include "esp_random.h"
+#include "esp_timer.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,140 +18,280 @@
 namespace protocol
 {
 
-// One frame's worth of connection-level decision making, shared by both
-// transports. It is constructed per frame, on the caller's stack, because the two
-// things it needs -- the Transport and the auth Gate -- are themselves per frame
-// on the local WebSocket: WsTransport wraps the httpd_req_t of this call, and
-// AuthGate wraps the connection slot it belongs to.
-//
-// What PERSISTS is the ChannelTable, which the transport owns and passes in by
-// reference: WsConnection holds one per browser, RelayManager holds one for its
-// pipe. So channel state is per Connection while the large frame buffers stay per
-// TASK, which is the only split that fits both transports -- the relay has one
-// connection on its own task, and esp_http_server serves up to four browser
-// sockets from one.
-//
-// This class is deliberately not an execution context. There is no task here, no
-// queue and no scheduler: a Connection serves one operation at a time, and a
-// long upload will hold it. That is v1's accepted limitation. What the table buys
-// is not concurrency but the ability to say something sensible about a frame that
-// is not the one being served.
+inline constexpr const char* CONNECTION_TAG = "Connection";
+
+/// The envelopes naming the two streams a device opens for itself. Ordinary
+/// envelope lines, read by the peer exactly as a command's is -- what used to be
+/// three reserved channel ids is now three ordinary channels with names.
+inline constexpr const char* LOG_STREAM_ENVELOPE = "{\"type\":\"log stream\"}\n";
+inline constexpr const char* TELEMETRY_STREAM_ENVELOPE = "{\"type\":\"telemetry stream\"}\n";
+
+/// One frame, framed on the caller's stack. Used for anything that is not a
+/// Channel's own reply: the handshake, a RESET, the OPEN of a passive stream.
+inline bool SendFrame(Transport& link, uint16_t id, uint8_t flags,
+                      const uint8_t* payload, size_t len)
+{
+    uint8_t frame[channel::HEADER_LEN + 96];
+    const size_t cap = sizeof(frame) - channel::HEADER_LEN;
+    if (len > cap) len = cap;
+
+    channel::writeHeader(frame, id, flags);
+    if (len) memcpy(frame + channel::HEADER_LEN, payload, len);
+    return link.SendRaw(frame, channel::HEADER_LEN + len);
+}
+
+/// Terminate a channel, in both directions, with a reason the peer can act on.
+///
+/// The reason strings are a small fixed set on purpose. "busy" in particular has to
+/// be distinguishable from a handler's own error, because a peer that one day runs
+/// handlers concurrently must retry rather than surface it -- which is what lets
+/// this wire format survive that change.
+inline void SendReset(Transport& link, uint16_t id, const char* reason)
+{
+    SendFrame(link, id, channel::FLAG_RESET,
+              reinterpret_cast<const uint8_t*>(reason), strlen(reason));
+    ESP_LOGD(CONNECTION_TAG, "channel %u reset: %s", static_cast<unsigned>(id), reason);
+}
+
+/// Draw a nonce. Mixed with the timer because esp_random() is only properly random
+/// with the RF subsystem up, and the case this protocol exists for -- two identical
+/// boards on a UART link, radios off, booted from the same image at the same
+/// moment -- is exactly where that assumption is weakest.
+inline uint64_t DrawNonce(uint64_t mixIn = 0)
+{
+    const uint64_t hi = esp_random();
+    const uint64_t lo = esp_random();
+    return ((hi << 32) ^ lo) ^ static_cast<uint64_t>(esp_timer_get_time()) ^ mixIn;
+}
+
+/// Send our half of the handshake. Called the moment the transport is up, without
+/// waiting for the peer, so neither side leads.
+inline bool SendHandshake(ConnectionState& state, Transport& link, uint64_t mixIn = 0)
+{
+    state.nonce = DrawNonce(mixIn);
+    state.attempts++;
+
+    uint8_t payload[channel::HANDSHAKE_LEN];
+    payload[0] = channel::PROTOCOL_VERSION;
+    channel::writeU64(payload + 1, state.nonce);
+
+    // Channel 0 by convention and ignored on receipt, so a hex dump reads cleanly
+    // and 0 stays usable as an ordinary id.
+    return SendFrame(link, 0, channel::FLAG_CONTROL, payload, sizeof(payload));
+}
+
+/// Open a device-initiated stream: OPEN carrying the envelope that names it, then
+/// nothing until a drain has something to push. No handler and no task -- the entry
+/// is Passive, which is all "channel != execution context" means in practice.
+inline bool OpenPassiveChannel(ConnectionState& state, Transport& link,
+                               const char* envelope, int32_t& out)
+{
+    if (state.phase != ConnectionState::Phase::Ready) return false;
+
+    uint16_t id = 0;
+    if (!state.AllocateId(id)) return false;
+    if (!state.channels.Open(id, ChannelTable::State::Passive)) return false;
+
+    if (!SendFrame(link, id, channel::FLAG_OPEN,
+                   reinterpret_cast<const uint8_t*>(envelope), strlen(envelope)))
+    {
+        state.channels.Close(id);
+        return false;
+    }
+
+    out = static_cast<int32_t>(id);
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// The per-frame facade. Built on the caller's stack because the two things it
+// wraps are per frame on the local socket: WsTransport holds that call's
+// httpd_req_t, AuthGate holds the connection slot it belongs to.
+// ──────────────────────────────────────────────────────────────────────────────
 template <class Dispatcher, class Gate>
 class Connection final : public ForeignFrameSink
 {
 public:
-    Connection(ChannelTable& table, Transport& link,
+    Connection(ConnectionState& state, Transport& link,
                Dispatcher& dispatcher, Gate& gate,
                uint8_t* outBuf, size_t outCap,
                uint8_t* inBuf, size_t inCap)
-        : table_(table), link_(link), dispatcher_(dispatcher), gate_(gate),
+        : state_(state), link_(link), dispatcher_(dispatcher), gate_(gate),
           outBuf_(outBuf), outCap_(outCap), inBuf_(inBuf), inCap_(inCap) {}
 
-    /// One frame off the wire, at the top of the transport's read loop. Nothing is
-    /// executing yet at this point -- a handler that were running would be the
-    /// thing holding the read, and its frames arrive through OnForeignFrame below.
+    /// One frame at the top of the transport's read loop. Nothing is executing
+    /// here -- a running handler owns the read, and its frames arrive through
+    /// OnForeignFrame below.
     void OnFrame(uint16_t id, uint8_t flags, const uint8_t* payload, size_t len)
     {
-        const bool final = (flags & channel::FLAG_FINAL) != 0;
-
-        if (ChannelTable::Entry* e = table_.Find(id))
+        if (flags & channel::FLAG_CONTROL)
         {
-            if (e->state == ChannelTable::State::Draining)
-            {
-                // The tail of a request whose handler already returned. Discarding
-                // it IS the handling; read as a fresh frame it would be taken for
-                // a request header.
-                if (final)
-                {
-                    table_.Close(id);
-                    ESP_LOGW(TAG, "channel %u: discarded the rest of an abandoned "
-                                  "request", static_cast<unsigned>(id));
-                }
-                return;
-            }
-
-            // Active, at the top of the read loop, is a contradiction: the handler
-            // owning it would have to have returned to get here. A peer that
-            // reuses a live id is the only way to see this.
-            Refuse(id, "channel already active");
+            OnControl(payload, len);
             return;
         }
 
-        ChannelTable::Entry* e = table_.Open(id);
-        if (!e)
+        if (state_.phase != ConnectionState::Phase::Ready)
         {
-            Refuse(id, "too many channels");
+            // On an ordered transport this cannot happen from a correct peer: it
+            // only sends channel traffic once READY, which means it has already
+            // sent the CONTROL that precedes this frame.
+            ESP_LOGW(CONNECTION_TAG, "channel %u before READY - dropped",
+                     static_cast<unsigned>(id));
+            return;
+        }
+
+        ChannelTable::Entry* e = state_.channels.Find(id);
+
+        if (flags & channel::FLAG_RESET)
+        {
+            // Terminal, both directions, and never answered with another RESET.
+            if (e) Forget(id);
+            return;
+        }
+
+        if (e)
+        {
+            if (e->state == ChannelTable::State::Active)
+            {
+                // Active at the top of the read loop is a contradiction: its
+                // handler would have had to return to get here.
+                SendReset(link_, id, "channel already active");
+                return;
+            }
+            // A Passive stream is ours to push on; the peer has nothing to say on
+            // it except RESET, handled above.
+            SendReset(link_, id, "not active");
+            Forget(id);
+            return;
+        }
+
+        // Unknown id. WITHOUT open this is residue from a channel that has already
+        // finished, or a stale frame from before a reconnect. Dropping it is the
+        // whole handling, and needing no memory of the dead channel to do it is
+        // what OPEN is for.
+        if (!(flags & channel::FLAG_OPEN)) return;
+
+        if (state_.channels.Busy())
+        {
+            SendReset(link_, id, "busy");
+            return;
+        }
+
+        if (!state_.channels.Open(id, ChannelTable::State::Active))
+        {
+            SendReset(link_, id, "too many channels");
             return;
         }
 
         Channel ch(id, link_, outBuf_, outCap_, inBuf_, inCap_, this);
-        ch.feedRequest(payload, len, final);
+        ch.feedRequest(payload, len, (flags & channel::FLAG_FINAL) != 0);
         protocol::RunCommandChannel(ch, dispatcher_, gate_);
 
-        // Returned without reaching FINAL -- a refusal, or a handler that read less
-        // than was sent. The rest is still coming, so remember the id until it does.
-        if (!ch.requestEnded() && !ch.failed())
-            table_.Drain(id);
-        else
-            table_.Close(id);
+        // Both directions are done: the handler finalled or reset its reply, and
+        // anything still arriving for this id is residue the rule above drops.
+        state_.channels.Close(id);
     }
 
 private:
-    static constexpr const char* TAG = "Connection";
+    void OnControl(const uint8_t* payload, size_t len)
+    {
+        if (len < channel::HANDSHAKE_LEN)
+        {
+            ESP_LOGW(CONNECTION_TAG, "short CONTROL frame (%u) - ignored",
+                     static_cast<unsigned>(len));
+            return;
+        }
+
+        if (state_.phase == ConnectionState::Phase::Ready)
+        {
+            // The peer restarted underneath us. On a socket the transport would
+            // have told us; on UART there is no such event, so this frame is the
+            // strongest signal there is. Drop everything and handshake again.
+            ESP_LOGW(CONNECTION_TAG, "peer restarted - re-handshaking");
+            state_.Reset();
+            SendHandshake(state_, link_);
+        }
+
+        const uint8_t version = payload[0];
+        if (version != channel::PROTOCOL_VERSION)
+        {
+            ESP_LOGE(CONNECTION_TAG,
+                     "protocol version %u, this firmware speaks %u - closing",
+                     static_cast<unsigned>(version),
+                     static_cast<unsigned>(channel::PROTOCOL_VERSION));
+            state_.phase = ConnectionState::Phase::Failed;
+            return;
+        }
+
+        const uint64_t peer = channel::readU64(payload + 1);
+        if (!state_.Settle(peer))
+        {
+            if (state_.attempts >= channel::MAX_HANDSHAKE_ATTEMPTS)
+            {
+                ESP_LOGE(CONNECTION_TAG, "nonce collision %u times - giving up",
+                         static_cast<unsigned>(state_.attempts));
+                state_.phase = ConnectionState::Phase::Failed;
+                return;
+            }
+            // Mix the peer's nonce in, so two boards with identical RNG state
+            // diverge instead of colliding identically again.
+            ESP_LOGW(CONNECTION_TAG, "nonce collision - redrawing");
+            SendHandshake(state_, link_, peer);
+            return;
+        }
+
+        state_.phase = ConnectionState::Phase::Ready;
+        ESP_LOGI(CONNECTION_TAG, "ready, channels %s half",
+                 state_.lowHalf ? "low" : "high");
+    }
 
     /// A frame for another channel, arriving while a handler holds the transport.
     ///
-    /// This runs INSIDE that handler, so it must not dispatch anything -- the one
-    /// execution context is already in use. It can only update the table and tell
-    /// the peer what it could not do, which is exactly the set of answers v1 owes:
-    /// swallow residue, refuse everything else as busy.
+    /// Runs INSIDE that handler, so it must not dispatch: the one execution context
+    /// is in use. It can update the table and tell the peer what it could not do,
+    /// which is the whole set of answers v1 owes.
     void OnForeignFrame(uint16_t id, uint8_t flags,
                         const uint8_t* payload, size_t len) override
     {
-        (void)payload;
-        (void)len;
-
-        if (ChannelTable::Entry* e = table_.Find(id))
+        if (flags & channel::FLAG_CONTROL)
         {
-            if (e->state == ChannelTable::State::Draining)
-            {
-                if (flags & channel::FLAG_FINAL) table_.Close(id);
-                return;
-            }
+            // Mid-request is not a legal place for this. Handling it would mean
+            // tearing down the channel we are reading, from inside it.
+            (void)payload; (void)len;
+            ESP_LOGW(CONNECTION_TAG, "CONTROL mid-request - ignored");
+            return;
         }
 
-        // A request we cannot start, because the one we are serving has the
-        // connection. Refusing says so at the caller instead of leaving it to time
-        // out, and the reason is a fixed string on purpose: a peer that later
-        // learns to retry has to be able to tell "busy" from a handler's own error.
-        Refuse(id, "busy");
+        ChannelTable::Entry* e = state_.channels.Find(id);
+
+        if (flags & channel::FLAG_RESET)
+        {
+            if (e) Forget(id);
+            return;
+        }
+
+        if (e) return;                          // a Passive stream: nothing to do
+        if (!(flags & channel::FLAG_OPEN)) return;   // residue: drop
+
+        SendReset(link_, id, "busy");
     }
 
-    /// One REJECT frame, framed on this stack rather than in outBuf_ -- that buffer
-    /// belongs to the channel currently being served and may hold half a reply.
-    /// Safe to interleave because a Transport send is one whole frame.
-    void Refuse(uint16_t id, const char* reason)
+    /// Drop a channel, and any role the connection had pinned to it.
+    void Forget(uint16_t id)
     {
-        uint8_t frame[channel::HEADER_LEN + 48];
-        const size_t cap = sizeof(frame) - channel::HEADER_LEN;
-        size_t n = strlen(reason);
-        if (n > cap) n = cap;
-
-        channel::writeHeader(frame, id, channel::FLAG_REJECT);
-        memcpy(frame + channel::HEADER_LEN, reason, n);
-        link_.SendRaw(frame, channel::HEADER_LEN + n);
-
-        ESP_LOGD(TAG, "channel %u refused: %s", static_cast<unsigned>(id), reason);
+        state_.channels.Close(id);
+        if (state_.logChannel == static_cast<int32_t>(id)) state_.logChannel = -1;
+        if (state_.telemetryChannel == static_cast<int32_t>(id)) state_.telemetryChannel = -1;
     }
 
-    ChannelTable& table_;
-    Transport&    link_;
-    Dispatcher&   dispatcher_;
-    Gate&         gate_;
-    uint8_t*      outBuf_;
-    size_t        outCap_;
-    uint8_t*      inBuf_;
-    size_t        inCap_;
+    ConnectionState& state_;
+    Transport&       link_;
+    Dispatcher&      dispatcher_;
+    Gate&            gate_;
+    uint8_t*         outBuf_;
+    size_t           outCap_;
+    uint8_t*         inBuf_;
+    size_t           inCap_;
 };
 
 }   // namespace protocol

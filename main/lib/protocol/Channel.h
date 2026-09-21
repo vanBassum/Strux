@@ -210,14 +210,14 @@ public:
     // Emit the final chunk, closing the reply direction.
     void finish() { emitChunk(channel::FLAG_FINAL); }
 
-    // Transport/framework refusal (unknown command, busy): one REJECT chunk
+    // Transport/framework refusal (unknown command, bad route): one RESET chunk
     // whose payload is the reason text.
     void reject(const char* reason)
     {
         size_t n = std::min(cap_, strlen(reason));
         memcpy(buf_ + channel::HEADER_LEN, reason, n);
         outLen_ = n;
-        emitChunk(channel::FLAG_REJECT);
+        emitChunk(channel::FLAG_RESET);
     }
 
     /// A read or write that stopped short because the transport broke, not because

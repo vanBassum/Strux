@@ -49,12 +49,21 @@ void WebSocketHandler::RegisterRoute(httpd_handle_t server)
 // Client tracking
 // ──────────────────────────────────────────────────────────────
 
-bool WebSocketHandler::AddWsClient(int fd, ConsoleManager& console)
+bool WebSocketHandler::AddWsClient(httpd_req_t* req, ConsoleManager& console)
 {
+    const int fd = httpd_req_to_sockfd(req);
     bool authed = !(auth_ && auth_->AuthRequired());   // empty password ⇒ authed at connect
     WsConnection* c = registry_.add(fd, authed, esp_timer_get_time());
     if (!c) return false;
-    c->logCursor = console.Tip();
+
+    c->conn.logCursor = console.Tip();
+
+    // Unprompted, the moment the socket exists. esp_http_server has already sent
+    // the 101 by the time this handler runs, so the frame is legal here, and
+    // sending rather than answering is what keeps the handshake symmetric: neither
+    // peer leads, and the same code works on a transport with no dialer at all.
+    WsTransport link(req, sendMutex_);
+    protocol::SendHandshake(c->conn, link);
     return true;
 }
 
@@ -76,15 +85,12 @@ void WebSocketHandler::OnClientDisconnected(int fd)
 
 void WebSocketHandler::PumpLogs(httpd_handle_t server, ConsoleManager& console)
 {
-    // Snapshot fd and cursor under the registry lock, then send outside it.
-    // Holding the lock across a send would deadlock the moment httpd internals
-    // called back into us, which is why the old broadcast did the same.
-    struct Peer { int fd; uint32_t cursor; };
-    Peer peers[ConnectionRegistry::MAX];
+    // Snapshot fds under the registry lock, then work outside it. Holding the lock
+    // across a send would deadlock the moment httpd internals called back into us.
+    int fds[ConnectionRegistry::MAX];
     int count = 0;
     registry_.forEach([&](const WsConnection& c) {
-        if (c.authed && count < ConnectionRegistry::MAX)
-            peers[count++] = { c.fd, c.logCursor };
+        if (c.authed && count < ConnectionRegistry::MAX) fds[count++] = c.fd;
     });
     if (count == 0) return;
 
@@ -98,38 +104,46 @@ void WebSocketHandler::PumpLogs(httpd_handle_t server, ConsoleManager& console)
 
     for (int i = 0; i < count; i++)
     {
-        while (size_t n = console.ReadJson(peers[i].cursor, json, sizeof(json)))
+        WsConnection* c = registry_.find(fds[i]);
+        if (!c) continue;
+
+        // READY *and* authed. READY is the protocol saying the id spaces are
+        // settled; authed is this transport's own policy, and on the LAN they are
+        // not the same question -- web.password may be set, and a browser that has
+        // not logged in has no business being handed the device's log stream. On
+        // the relay pipe authed is true from connect, so the two coincide there
+        // and the difference only shows up here.
+        if (c->conn.phase != ConnectionState::Phase::Ready) continue;
+
+        WsPumpTransport link(server, fds[i], sendMutex_);
+
+        if (c->conn.logChannel < 0)
         {
-            channel::writeHeader(frame, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+            if (!protocol::OpenPassiveChannel(c->conn, link, protocol::LOG_STREAM_ENVELOPE,
+                                              c->conn.logChannel))
+                continue;
+        }
+
+        const uint16_t id = static_cast<uint16_t>(c->conn.logChannel);
+
+        while (size_t n = console.ReadJson(c->conn.logCursor, json, sizeof(json)))
+        {
+            // No FINAL: this direction stays open for the life of the connection.
+            // The peer ends it with RESET when it stops wanting logs.
+            channel::writeHeader(frame, id, 0);
             memcpy(frame + channel::HEADER_LEN, json, n);
 
-            httpd_ws_frame_t ws = {};
-            ws.type = HTTPD_WS_TYPE_BINARY;
-            ws.payload = frame;
-            ws.len = channel::HEADER_LEN + n;
-
-            esp_err_t err;
+            if (!link.SendRaw(frame, channel::HEADER_LEN + n))
             {
-                LOCK(sendMutex_);
-                err = httpd_ws_send_frame_async(server, peers[i].fd, &ws);
-            }
-
-            if (err != ESP_OK)
-            {
-                // DEBUG, not WARN. A browser that closes a tab or reloads takes its
-                // socket with it without a close frame, so the next send to that fd
-                // fails - every page close produced two scary lines about a device
-                // that was working perfectly. Removing the client IS the handling.
-                ESP_LOGD(TAG, "log pump failed to fd=%d, removing", peers[i].fd);
-                registry_.remove(peers[i].fd);
-                peers[i].fd = -1;
+                // DEBUG, not WARN. A browser that closes a tab takes its socket
+                // with it without a close frame, so the next send fails - every
+                // page close produced two scary lines about a device that was
+                // working perfectly. Removing the client IS the handling.
+                ESP_LOGD(TAG, "log pump failed to fd=%d, removing", fds[i]);
+                registry_.remove(fds[i]);
                 break;
             }
         }
-
-        // Write the cursor back, so this browser is not sent these lines twice.
-        if (peers[i].fd >= 0)
-            if (auto* c = registry_.find(peers[i].fd)) c->logCursor = peers[i].cursor;
     }
 }
 
@@ -147,7 +161,7 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         // (see AuthGate). esp_http_server has already sent the 101; we
         // only need a client slot. A full table (after reaping stale un-authed
         // sockets) refuses the upgrade so the client hits its reconnect loop.
-        if (!self->AddWsClient(httpd_req_to_sockfd(req), *self->console_))
+        if (!self->AddWsClient(req, *self->console_))
             return ESP_FAIL;
         return ESP_OK;
     }
@@ -240,8 +254,16 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     AuthGate gate(*conn, *auth_);
 
     protocol::Connection<CommandManager, AuthGate> connection(
-        conn->channels, link, *commandManager_, gate,
+        conn->conn, link, *commandManager_, gate,
         channelFrame_, CHANNEL_WINDOW,
         channelInbound_, sizeof(channelInbound_));
     connection.OnFrame(sid, flags, payload, plen);
+
+    if (conn->conn.phase == ConnectionState::Phase::Failed)
+    {
+        // Version mismatch, or a handshake that never settled. Nothing on this
+        // socket can be understood, so end it rather than leave it half-open.
+        ESP_LOGW(TAG, "connection on fd=%d failed its handshake - dropping", fd);
+        registry_.remove(fd);
+    }
 }

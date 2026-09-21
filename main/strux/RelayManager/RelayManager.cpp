@@ -149,7 +149,7 @@ void RelayManager::BuildUri()
     // IDENTITY ONLY. `id` is technical, is what the token proves, and is the address
     // in every relay URL — nothing else belongs in a string that is logged, proxied
     // and cached on the way. What this device is CALLED, what it runs and what it was
-    // built from go up as a hello on the socket instead (SendHello), where adding a
+    // built from are answered by `system info` on an ordinary channel, where adding a
     // fact costs a key rather than a query parameter, a percent-encoder and a bigger
     // buffer on both sides.
     const char* sep = strchr(url, '?') ? "&" : "?";
@@ -206,107 +206,6 @@ static bool AppendPair(char* out, size_t cap, const char* key, const char* value
     return true;
 }
 
-void RelayManager::SendHello()
-{
-    const esp_app_desc_t* app = esp_app_get_description();
-
-    char name[48] = {};
-    strux_.getSystemManager().GetDeviceName(name, sizeof(name));
-
-    char built[32] = {};
-    if (app) snprintf(built, sizeof(built), "%s %s", app->date, app->time);
-
-    // The address the device has on its OWN network, which is the only party that
-    // knows it. What the relay sees on the socket is wherever the connection came
-    // out — a NAT, and behind a reverse proxy its own docker-network peer — so the
-    // column it filled from that was showing 172.18.0.x for every device on the
-    // list. 16 bytes is "255.255.255.255" and its NUL.
-    char ip[16] = {};
-    strux_.getNetworkManager().GetIpv4(ip, sizeof(ip));
-
-    // Built in the outbound framing buffer rather than on the stack: this task's
-    // stack is sized for the heaviest command handler and must not also carry this.
-    // Safe to borrow — a hello goes out before any channel exists on this pipe.
-    char* body = reinterpret_cast<char*>(channelFrame_ + channel::HEADER_LEN);
-    const size_t cap = sizeof(channelFrame_) - channel::HEADER_LEN;
-
-    // ── Everything this device tells the relay about itself ──────────────────
-    //
-    // The relay takes whatever keys arrive, so this table IS the contract: one row
-    // per key, the expression its value comes from, and whether this firmware
-    // considers it required. Adding a fact is a row and nothing else, on either side.
-    //
-    // `required` is the device's own statement, not the server's. It marks a key
-    // whose value this build can always produce, so an empty one is a bug HERE — a
-    // manager that did not initialise, an app descriptor that did not load — and it
-    // says so in the log rather than quietly shipping a device list entry that
-    // cannot be told apart from another board's. The hello still goes out: a partial
-    // one identifies the device better than none.
-    //
-    // An optional key that is empty is a fact this build does not have, not a
-    // failure. It is omitted entirely, and the relay shows a blank rather than the
-    // word "unknown".
-    struct HelloField
-    {
-        const char* key;
-        const char* value;
-        bool        required;
-    };
-
-    const HelloField fields[] = {
-        //  key         value                                required
-        //  ───────────────────────────────────────────────────────────────────────
-        {   "name",     name,                                true    },  // what a human calls this board; falls back to the project name
-        {   "project",  app ? app->project_name : nullptr,   true    },  // the firmware's identity — which product this is
-        {   "desc",     strux_.getSystemManager().GetDescription(),
-                                                             false   },  // one line saying what this product IS, registered by the
-                                                                         // application (DeviceDoc.h). Optional: a fork that has not
-                                                                         // written one yet is a device with no description, not a
-                                                                         // broken hello. The LONG form is not here, it is served by
-                                                                         // `system describe` -- a README does not belong in a chunk
-                                                                         // every reconnect re-sends.
-        {   "fw",       app ? app->version : nullptr,        true    },  // the git TAG (0.1.0), so two builds can share it
-        {   "commit",   STRUX_GIT_COMMIT,                    false   },  // short sha + "-dirty", which is what tells those two apart.
-                                                                         // Optional because a source drop with no .git is a legitimate
-                                                                         // way to build this, and it yields an empty string.
-        {   "idf",      app ? app->idf_ver : nullptr,        false   },  // ESP-IDF version the image was built against
-        {   "built",    built,                               false   },  // compile date and time, from esp_app_desc_t
-        {   "ip",       ip,                                  true    },  // this device's address on its own LAN. Required: the hello goes
-                                                                         // out over a socket that is already up, so an IPv4 exists by
-                                                                         // definition here, and an empty one is a bug in this firmware.
-    };
-
-    // `type` is for whoever reads a packet capture; the relay drops it, because the
-    // CHANNEL id is what actually names this chunk.
-    snprintf(body, cap, "{\"type\":\"relay hello\"");
-
-    // cap - 1 throughout: the closing brace below is reserved, so a pair can never
-    // fill the buffer and leave the JSON unterminated.
-    for (const HelloField& f : fields)
-    {
-        if (!f.value || f.value[0] == '\0')
-        {
-            if (f.required)
-                ESP_LOGW(TAG, "hello: required field '%s' is empty", f.key);
-            continue;
-        }
-
-        if (!AppendPair(body, cap - 1, f.key, f.value))
-            ESP_LOGW(TAG, "hello: '%s' does not fit — it is omitted", f.key);
-    }
-
-    strlcat(body, "}", cap);
-
-    const size_t len = strlen(body);
-    channel::writeHeader(channelFrame_, channel::HELLO_CHANNEL, channel::FLAG_FINAL);
-
-    // Best effort, and deliberately not retried: nothing is waiting on it, and a pipe
-    // that cannot carry 200 bytes is about to fail on its own and reconnect — which
-    // sends the hello again. The cost of a lost one is a device list missing a name
-    // until then.
-    if (!socket_.SendBinary(channelFrame_, channel::HEADER_LEN + len, HELLO_SEND_TIMEOUT_MS))
-        ESP_LOGW(TAG, "could not send hello");
-}
 
 // ──────────────────────────────────────────────────────────
 // The pipe: connect, read, dispatch, repeat
@@ -356,10 +255,15 @@ void RelayManager::TaskLoop()
             reconnectDelayMs_   = RECONNECT_DELAY_MS;
 
             OnConnected();
-            // Before anything else on this pipe, and on every reconnect rather than
-            // once: the relay holds what a device said per connection, and a board
-            // that was reflashed while away is a board whose answers changed.
-            SendHello();
+            // Before anything else on this pipe: both peers send their handshake
+            // unprompted, so neither leads and the same code works on a transport
+            // with no dialer. What this device IS used to go out here as a hello on
+            // a reserved channel; it is an ordinary `system info` command now, which
+            // the relay calls once the connection is READY.
+            {
+                RelayTransport link(socket_);
+                protocol::SendHandshake(conn_.conn, link);
+            }
             // Right after connect, because on a wss:// pipe the TLS handshake just
             // ran on this stack and is one of the two things it has to fit.
             CheckStackHeadroom();
@@ -373,6 +277,7 @@ void RelayManager::TaskLoop()
         // Between requests is the only safe point: mid-request this task is inside
         // a handler that owns the socket, which is v1's accepted head-of-line
         // blocking. A long upload delays logs; it does not lose them.
+        OpenStreams();
         DrainConsole();
         DrainTelemetry();
 
@@ -428,8 +333,10 @@ void RelayManager::OnConnected()
     // even the login page that would have unlocked it.
     conn_.authed = true;
 
-    // A reconnect is not a reason to replay: start where the ring is now.
-    logCursor_ = strux_.getConsoleManager().Tip();
+    // A fresh pipe knows no channels and has not handshaken. The cursor starts at
+    // the tip because a reconnect is not a reason to replay.
+    conn_.conn.Reset();
+    conn_.conn.logCursor = strux_.getConsoleManager().Tip();
     linkUp_ = true;
 
     // Says WHY the pipe is open, which is no longer "nobody set a password": this
@@ -514,10 +421,19 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
     AuthGate gate(conn_, *auth_);
 
     protocol::Connection<CommandManager, AuthGate> connection(
-        conn_.channels, link, strux_.getCommandManager(), gate,
+        conn_.conn, link, strux_.getCommandManager(), gate,
         channelFrame_, CHANNEL_WINDOW,
         channelInbound_, sizeof(channelInbound_));
     connection.OnFrame(id, flags, payload, plen);
+
+    if (conn_.conn.phase == ConnectionState::Phase::Failed)
+    {
+        // A version the relay does not share, or nonces that would not settle.
+        // Nothing on this pipe can be understood, so drop it and let the reconnect
+        // loop try again.
+        ESP_LOGE(TAG, "handshake failed - dropping the pipe");
+        OnDisconnected();
+    }
 
     // The handler just ran on this stack; if it was the deepest one yet, say so.
     CheckStackHeadroom();
@@ -553,19 +469,37 @@ void RelayManager::CheckStackHeadroom()
 // further down the stack, and saying nothing ourselves covers the rest.
 // ──────────────────────────────────────────────────────────────
 
+void RelayManager::OpenStreams()
+{
+    if (!linkUp_ || conn_.conn.phase != ConnectionState::Phase::Ready) return;
+
+    RelayTransport link(socket_);
+
+    if (conn_.conn.logChannel < 0)
+        protocol::OpenPassiveChannel(conn_.conn, link, protocol::LOG_STREAM_ENVELOPE,
+                                     conn_.conn.logChannel);
+
+    if (conn_.conn.telemetryChannel < 0 && strux_.getTelemetryManager().IsEnabled())
+        protocol::OpenPassiveChannel(conn_.conn, link, protocol::TELEMETRY_STREAM_ENVELOPE,
+                                     conn_.conn.telemetryChannel);
+}
+
 void RelayManager::DrainConsole()
 {
-    if (!linkUp_) return;
+    if (!linkUp_ || conn_.conn.logChannel < 0) return;
 
+    const uint16_t id = static_cast<uint16_t>(conn_.conn.logChannel);
     auto& console = strux_.getConsoleManager();
     ConsoleManager::DrainScope guard(console);
 
     char json[ConsoleManager::JSON_CAP];
     uint8_t frame[channel::HEADER_LEN + ConsoleManager::JSON_CAP];
 
-    while (size_t n = console.ReadJson(logCursor_, json, sizeof(json)))
+    // No FINAL: this direction stays open for the life of the connection, and the
+    // peer ends it with RESET when it stops wanting logs.
+    while (size_t n = console.ReadJson(conn_.conn.logCursor, json, sizeof(json)))
     {
-        channel::writeHeader(frame, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+        channel::writeHeader(frame, id, 0);
         memcpy(frame + channel::HEADER_LEN, json, n);
         if (!socket_.SendBinary(frame, channel::HEADER_LEN + n, BROADCAST_TIMEOUT_MS))
             return;
@@ -574,8 +508,9 @@ void RelayManager::DrainConsole()
 
 void RelayManager::DrainTelemetry()
 {
-    if (!linkUp_) return;
+    if (!linkUp_ || conn_.conn.telemetryChannel < 0) return;
 
+    const uint16_t id = static_cast<uint16_t>(conn_.conn.telemetryChannel);
     auto& telemetry = strux_.getTelemetryManager();
     if (!telemetry.IsEnabled()) return;
 
@@ -588,7 +523,7 @@ void RelayManager::DrainTelemetry()
         const size_t n = telemetry.Drain(batch, sizeof(batch), lines);
         if (n == 0) return;
 
-        channel::writeHeader(frame, channel::TELEMETRY_CHANNEL, channel::FLAG_FINAL);
+        channel::writeHeader(frame, id, 0);
         memcpy(frame + channel::HEADER_LEN, batch, n);
 
         if (socket_.SendBinary(frame, channel::HEADER_LEN + n, BROADCAST_TIMEOUT_MS))
