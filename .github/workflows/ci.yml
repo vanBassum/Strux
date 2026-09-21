@@ -69,6 +69,12 @@ jobs:
       - name: Typecheck
         run: cd frontend && pnpm typecheck
 
+      # The reply reader is the one place a mistake would make the answer depend
+      # on the transport's buffer size, so it is tested at every fragmentation
+      # from one byte up. See src/lib/reply.test.ts.
+      - name: Test
+        run: cd frontend && pnpm test
+
       - name: Build
         run: cd frontend && pnpm build
 

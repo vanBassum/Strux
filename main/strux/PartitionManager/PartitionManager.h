@@ -98,8 +98,8 @@ private:
           "'system reboot' returns to the same image every time. An image that "
           "does not validate is refused." },
         { "partition", "read",     &InvokeCommand<&PartitionManager::Cmd_DownloadPartition>,
-          "Read a partition back. The reply is the raw partition bytes and nothing "
-          "else - no header record - streamed until the channel closes, which can "
-          "be megabytes. The size is what 'partition list' reports." },
+          "Read a partition back. The reply is one header record - ok, size, and "
+          "contentType application/octet-stream - then a newline, then that many "
+          "raw bytes, streamed until the channel closes. Can be megabytes." },
     };
 };

@@ -1,6 +1,7 @@
 // Singleton backend service — all communication over a single WebSocket.
 
 import { DEV_HOST } from "@/config"
+import { ReplyReader } from "./reply"
 
 const TOKEN_KEY = "device.token"
 
@@ -13,17 +14,24 @@ interface PendingRequest {
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
   timeoutMs: number
-  chunks: Uint8Array[]
-  received: number
-  // When set, each non-final reply chunk is parsed as its own JSON message and
-  // passed here (e.g. upload progress); the final chunk resolves the request.
-  // Absent → default behaviour: accumulate all chunks and parse once at FINAL.
+  // Turns transport chunks back into reply records. It, and not this file, is
+  // what knows the reply format — see lib/reply.ts.
+  reader: ReplyReader
+  // Called for each record completed before the last one. A record is delimited
+  // by a newline in the BYTES, so this fires the same way whatever size the
+  // transport framed in.
   onMessage?: (msg: Record<string, unknown>) => void
-  // Binary reply mode (e.g. partition download): accumulate raw chunks and
-  // resolve with the reassembled Uint8Array instead of parsing JSON. onData
-  // reports cumulative bytes received, for progress.
-  binary?: boolean
+  // The caller expects a declared body (a header record with contentType, then
+  // bytes). Resolves with { header, body } instead of the parsed record.
+  wantsBody?: boolean
+  // Cumulative BODY bytes, for progress.
   onData?: (received: number) => void
+}
+
+/** A reply that declared a body: the header record, and the bytes after it. */
+export interface BodyReply<H = Record<string, unknown>> {
+  header: H
+  body: Uint8Array
 }
 
 /** Per-call options for `send`. A strict subset of what `awaitReply` takes: the
@@ -38,20 +46,16 @@ export interface SendOptions<M = Record<string, unknown>> {
    *  10 s, which is short for anything that writes flash. */
   timeoutMs?: number
 
-  /** Called for every NON-final reply chunk.
+  /** Called for each reply RECORD completed before the last one.
    *
-   *  Passing this CHANGES HOW THE REPLY IS READ, and that is not a detail a
-   *  caller can ignore. Without it, chunks are concatenated and parsed once at
-   *  FINAL, so a reply of any size works. With it, EVERY CHUNK IS PARSED AS ITS
-   *  OWN COMPLETE JSON RECORD - which is right for a command that emits one
-   *  record per chunk (`partition write` reports {"p":<bytes>} as it goes), and
-   *  wrong for an ordinary command whose single reply happens to be longer than
-   *  the transport's reply window, where each piece is a fragment and parses as
-   *  nothing.
+   *  A record is delimited by a newline in the bytes, so this fires the same way
+   *  whatever size the transport framed in, and an ordinary reply -- which is a
+   *  single record of any length -- produces none of them. Passing this is
+   *  therefore safe for any command: at worst nothing arrives.
    *
-   *  The transport cannot tell the two apart, because a reply does not say which
-   *  shape it is - the same gap as #32. So this is the caller's judgement: pass
-   *  it only for a command documented to stream records. */
+   *  That was NOT true when this was first exposed. It used to hand over every
+   *  non-final transport chunk, so a reply merely longer than the reply window
+   *  was delivered as fragments and then failed to parse. See lib/reply.ts. */
   onMessage?: (msg: M) => void
 }
 
@@ -449,7 +453,7 @@ class BackendService {
     opts: {
       timeoutMs?: number
       onMessage?: (msg: Record<string, unknown>) => void
-      binary?: boolean
+      wantsBody?: boolean
       onData?: (received: number) => void
     } = {},
   ): Promise<T> {
@@ -466,10 +470,9 @@ class BackendService {
         reject,
         timer,
         timeoutMs,
-        chunks: [],
-        received: 0,
+        reader: new ReplyReader(),
         onMessage: opts.onMessage,
-        binary: opts.binary,
+        wantsBody: opts.wantsBody,
         onData: opts.onData,
       })
     })
@@ -578,70 +581,54 @@ class BackendService {
       return
     }
 
-    // Binary reply (e.g. partition download): accumulate raw chunks, report
-    // cumulative bytes for progress, and resolve with the reassembled bytes at
-    // FINAL. The caller interprets the payload (image bytes, or a short JSON
-    // error object the device may send instead).
-    if (req.binary) {
-      const chunk = view.subarray(3)
-      req.chunks.push(chunk)
-      req.received += chunk.length
-      this.bumpTimer(session)
-      req.onData?.(req.received)
-      if (flags & FLAG_FINAL) {
-        this.pending.delete(session)
-        clearTimeout(req.timer)
-        const buf = new Uint8Array(req.received)
-        let off = 0
-        for (const c of req.chunks) {
-          buf.set(c, off)
-          off += c.length
-        }
-        req.resolve(buf)
-      }
-      return
-    }
+    // ONE path for every reply shape, because the wire has one: records
+    // separated by newlines, optionally followed by a declared body. The reader
+    // owns that; this only decides what to do with what it hands back.
+    //
+    // What is gone with the two branches that used to be here is the assumption
+    // underneath both of them -- that a transport chunk is a unit of meaning. It
+    // never was. A chunk is emitted when Channel's reply buffer fills, and also
+    // when a handler flushes a record, and those are the same frame with the
+    // same flags. See lib/reply.ts and main/lib/protocol/ReplyBody.h.
+    const records = req.reader.push(view.subarray(3))
+    this.bumpTimer(session)
 
-    // Streaming reply: each chunk is one complete JSON message. Intermediate
-    // chunks go to onMessage; the FINAL chunk resolves the request.
-    if (req.onMessage) {
-      const text = new TextDecoder().decode(view.subarray(3))
-      if (flags & FLAG_FINAL) {
-        this.pending.delete(session)
-        clearTimeout(req.timer)
-        try {
-          req.resolve(text.length ? JSON.parse(text) : {})
-        } catch (e) {
-          req.reject(e instanceof Error ? e : new Error("bad reply"))
-        }
-      } else if (text.length) {
-        this.bumpTimer(session)
-        try {
-          req.onMessage(JSON.parse(text))
-        } catch {
-          /* ignore a malformed progress message */
-        }
-      }
-      return
-    }
-
-    req.chunks.push(view.subarray(3))
-    if (flags & FLAG_FINAL) {
-      this.pending.delete(session)
-      clearTimeout(req.timer)
-      const total = req.chunks.reduce((a, c) => a + c.length, 0)
-      const buf = new Uint8Array(total)
-      let off = 0
-      for (const c of req.chunks) {
-        buf.set(c, off)
-        off += c.length
-      }
-      const text = new TextDecoder().decode(buf)
+    for (const text of records) {
+      if (!req.onMessage) continue
       try {
-        req.resolve(text.length ? JSON.parse(text) : {})
-      } catch (e) {
-        req.reject(e instanceof Error ? e : new Error("bad reply"))
+        req.onMessage(JSON.parse(text))
+      } catch {
+        /* a record that is not JSON is not a progress message; ignore it */
       }
+    }
+    if (req.onData && req.reader.hasBody) req.onData(req.reader.received)
+
+    if (!(flags & FLAG_FINAL)) return
+
+    this.pending.delete(session)
+    clearTimeout(req.timer)
+    const reply = req.reader.end()
+
+    if (req.wantsBody) {
+      if (!reply.body || !reply.header) {
+        // The command answered without declaring a body. That is a refusal
+        // record -- an unknown partition, a closed door -- and it is now
+        // readable AS a refusal instead of being guessed at by length and
+        // prefix, which is what this used to do.
+        const refusal = tryParse(reply.result) ?? tryParse(reply.records.at(-1) ?? "")
+        const why = typeof refusal?.error === "string" ? refusal.error : "no body in reply"
+        req.reject(new Error(why))
+        return
+      }
+      req.onData?.(reply.body.length)
+      req.resolve({ header: reply.header, body: reply.body })
+      return
+    }
+
+    try {
+      req.resolve(reply.result.length ? JSON.parse(reply.result) : {})
+    } catch (e) {
+      req.reject(e instanceof Error ? e : new Error("bad reply"))
     }
   }
 
@@ -885,33 +872,33 @@ class BackendService {
     }
   }
 
-  /** One command whose REPLY is a stream: the envelope goes out as a single FINAL
-   *  chunk and the device writes bytes back until it FINALs, with no length header.
+  /** One command whose reply is a HEADER RECORD AND A BODY: the header names the
+   *  media type, the bytes follow it, and this returns both.
    *
-   *  The generic form of `downloadPartitionFile`, and the mirror of `uploadSession`.
-   *  It stops at the bytes on purpose: saving a file is a host concern — an anchor
-   *  click here, something else in another shell — while "give me the bytes" is the
-   *  same question everywhere, which is what makes it expressible in the contract.
+   *  Generic on purpose -- it names no command and no media type. That is the
+   *  whole point of #32: a caller that discovered a command through `help
+   *  describe` can perform it and read the answer without a second, private
+   *  agreement about which commands return bytes. The relay's MCP surface reads
+   *  replies by exactly this rule already (api/Mcp/DeviceReply.cs).
    *
-   *  `total`, when the caller knows it, is used for progress AND for a length check.
-   *  The device always streams a whole partition, so a short read means a mid-stream
-   *  flash or socket failure produced a truncated image followed by a FINAL — which
-   *  would otherwise be saved as a corrupt file that looks fine.
+   *  A command that refuses answers with an ordinary record and no body, and
+   *  that arrives here as a rejection carrying the device's own `error` -- not
+   *  as a tiny file. It used to be found by testing whether a short reply began
+   *  with {"ok":false, which a partition image is perfectly entitled to contain.
    *
-   *  Runs through the open queue, so it owns the socket until it finishes: the device
-   *  would REJECT an interleaved session id. */
-  async downloadSession(
+   *  Runs through the open queue, so it owns the socket until it finishes. */
+  async downloadSessionWithHeader<H = Record<string, unknown>>(
     type: string,
     params: Record<string, unknown> | undefined,
     total?: number,
     onProgress?: (fraction: number) => void,
-  ): Promise<Blob> {
-    const buf = await this.enqueue(async () => {
+  ): Promise<BodyReply<H>> {
+    const reply = await this.enqueue(async () => {
       await this.ensureConnected()
       const session = this.allocSession()
-      const reply = this.awaitReply<Uint8Array<ArrayBuffer>>(session, {
+      const pending = this.awaitReply<BodyReply<H>>(session, {
         timeoutMs: 120000,
-        binary: true,
+        wantsBody: true,
         onData: (received) => {
           if (total) onProgress?.(Math.min(1, received / total))
         },
@@ -920,67 +907,43 @@ class BackendService {
         JSON.stringify({ type, ...(params ?? {}) }) + "\n",
       )
       this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, body)
-      return reply
+      return pending
     })
 
-    // A short reply that parses as a JSON error means the device refused instead of
-    // streaming bytes — an unknown partition, say. It arrives as a successful reply,
-    // so it has to be read out of the payload or a failure becomes a tiny "image".
-    if (buf.length < 256) {
-      const text = new TextDecoder().decode(buf)
-      if (text.startsWith('{"ok":false'))
-        throw new Error(JSON.parse(text).error ?? "download failed")
-    }
-
-    if (total && buf.length !== total)
-      throw new Error(`incomplete download: got ${buf.length} of ${total} bytes`)
+    // The device streams a whole partition, so a short body means a mid-stream
+    // flash or socket failure produced a truncated image followed by a FINAL --
+    // which would otherwise be saved as a corrupt file that looks fine. The
+    // header now states the size, so this no longer depends on the CALLER
+    // knowing it.
+    const declared =
+      typeof (reply.header as Record<string, unknown>).size === "number"
+        ? ((reply.header as Record<string, unknown>).size as number)
+        : total
+    if (declared !== undefined && reply.body.length !== declared)
+      throw new Error(`incomplete download: got ${reply.body.length} of ${declared} bytes`)
 
     onProgress?.(1)
-    return new Blob([buf])
+    return reply
   }
 
-  /** Download a partition image as one outbound streamed session and save it as
-   *  <label>.bin. The device writes the raw partition bytes to the reply stream,
-   *  chunked and ended by FINAL (or, on failure, a short JSON error object). The
-   *  reply is chunked with no length header, so progress is computed against
-   *  expectedSize — the UI knows it from the partition table. Runs through the
-   *  open queue, so it owns the socket until it finishes (the device would REJECT
-   *  an interleaved session id). */
+  /** Download a partition image and save it as <label>.bin.
+   *
+   *  Everything about reading the reply now lives in downloadSessionWithHeader;
+   *  what is left here is the one thing that is genuinely this method's own --
+   *  that a browser saves a file by clicking an anchor. */
   async downloadPartitionFile(
     label: string,
     expectedSize?: number,
     onProgress?: (percent: number) => void,
   ): Promise<void> {
-    const buf = await this.enqueue(async () => {
-      await this.ensureConnected()
-      const session = this.allocSession()
-      const reply = this.awaitReply<Uint8Array<ArrayBuffer>>(session, {
-        timeoutMs: 120000,
-        binary: true,
-        onData: (received) => {
-          if (expectedSize) onProgress?.(Math.min(100, Math.round((received / expectedSize) * 100)))
-        },
-      })
-      // Request = one FINAL chunk: the command envelope, no body.
-      const body = new TextEncoder().encode(JSON.stringify({ type: "partition read", partition: label }) + "\n")
-      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, body)
-      return reply
-    })
+    const { body } = await this.downloadSessionWithHeader(
+      "partition read",
+      { partition: label },
+      expectedSize,
+      (fraction) => onProgress?.(Math.round(fraction * 100)),
+    )
 
-    // A short reply that is a JSON error object means the device refused the
-    // request (e.g. unknown partition) instead of streaming image bytes.
-    if (buf.length < 256) {
-      const text = new TextDecoder().decode(buf)
-      if (text.startsWith('{"ok":false')) throw new Error(JSON.parse(text).error ?? "download failed")
-    }
-    // The device always streams the whole partition; a short read (a mid-stream
-    // flash/socket failure) would leave a truncated image + FINAL, so verify the
-    // length rather than silently saving a corrupt file.
-    if (expectedSize && buf.length !== expectedSize) {
-      throw new Error(`incomplete download: got ${buf.length} of ${expectedSize} bytes`)
-    }
-
-    const url = URL.createObjectURL(new Blob([buf]))
+    const url = URL.createObjectURL(new Blob([body as BlobPart]))
     const a = document.createElement("a")
     a.href = url
     a.download = `${label}.bin`
@@ -989,6 +952,15 @@ class BackendService {
     onProgress?.(100)
   }
 
+}
+
+function tryParse(text: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(text)
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
 }
 
 const instance = new BackendService()

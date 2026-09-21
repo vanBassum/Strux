@@ -1,4 +1,5 @@
 #include "PartitionManager.h"
+#include "ReplyBody.h"
 #include "PartitionWriter.h"
 #include "CommandManager.h"
 #include "esp_log.h"
@@ -248,8 +249,9 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
             {
                 auto progress = ctx.reply.object();
                 progress.field("p", static_cast<uint32_t>(w.written()));
-            }   // closed before the flush, or the chunk carries half a record
-            ctx.out.flush();                       // push this progress chunk now
+            }   // closed before the separator, or the newline lands inside it
+            protocol::EndRecord(ctx.out);
+            ctx.out.flush();                       // push it now, not at FINAL
             reported = w.written();
         }
     }
@@ -388,6 +390,20 @@ RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
         resp.field("error", "transport cannot stream");
         return RequestError::Ok;
     }
+
+    // The header record, and the reason this command stopped answering with bare
+    // bytes. Every refusal above is an ordinary record, so a reader that got only
+    // bytes had to GUESS which it was holding -- the frontend did it by testing
+    // whether a short reply began with {"ok":false, which a partition is entitled
+    // to contain. Declaring the body removes the guess: one record, then the size
+    // so a truncated read is detectable, then the bytes.
+    {
+        auto head = ctx.reply.object();
+        head.field("ok", true);
+        head.field("size", static_cast<uint32_t>(p->size));
+        head.field("contentType", protocol::CONTENT_TYPE_OCTETS);
+    }
+    protocol::EndRecord(ctx.out);
 
     // Read flash straight into the reply frame the transport is about to send. The
     // run is one chunk's worth of payload, not a size of ours — which is why there

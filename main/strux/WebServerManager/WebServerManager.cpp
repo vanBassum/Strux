@@ -1,4 +1,5 @@
 #include "WebServerManager.h"
+#include "ReplyBody.h"
 #include "ConsoleManager.h"
 #include "SettingsManager.h"
 #include "CommandManager.h"
@@ -150,7 +151,7 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
             head.field("ok", true);
             head.field("status", static_cast<uint32_t>(404));
         }
-        ctx.out.write("\n", 1);
+        protocol::EndRecord(ctx.out);
         return RequestError::Ok;   // the request was fine; the file simply is not there
     }
 
@@ -162,7 +163,7 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
         if (file.gzipped)
             head.field("contentEncoding", "gzip");
     }
-    ctx.out.write("\n", 1);
+    protocol::EndRecord(ctx.out);
 
     // One write of the whole file, straight from flash-mapped rodata: Channel::write
     // splits it across the channel window itself, so a 200 KB bundle still needs no
