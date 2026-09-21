@@ -8,6 +8,7 @@
 #include "StaticFileHandler.h"
 #include "WebSocketHandler.h"
 #include "Authenticator.h"
+#include "Task.h"
 
 class Stream;
 
@@ -24,7 +25,19 @@ public:
 
     void Init();
 
-    void Broadcast(const char* json, int len);
+private:
+    /// How often the pump looks for new log lines. The LAN transport is purely
+    /// reactive -- esp_http_server calls into it only when a frame arrives -- so
+    /// unlike the relay, which drains inside its own read loop, this side needs
+    /// something to do the walking. Short enough that a console feels live,
+    /// long enough that an idle device is not waking ten times a second.
+    static constexpr int PUMP_INTERVAL_MS = 100;
+
+    Task consolePump_;
+    void ConsolePumpLoop();
+
+public:
+
 
     /// The credential authority, shared with any other transport that carries the
     /// auth handshake (the relay pipe). Owned here because HTTP/WS auth started

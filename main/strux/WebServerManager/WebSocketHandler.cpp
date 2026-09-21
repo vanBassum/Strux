@@ -4,6 +4,7 @@
 #include "AuthGate.h"
 #include "WsTransport.h"   // the concrete Transport for this socket
 #include "Connection.h"
+#include "ConsoleManager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -25,6 +26,11 @@ void WebSocketHandler::SetAuth(Authenticator& auth)
     auth_ = &auth;
 }
 
+void WebSocketHandler::SetConsole(ConsoleManager& console)
+{
+    console_ = &console;
+}
+
 void WebSocketHandler::RegisterRoute(httpd_handle_t server)
 {
     const httpd_uri_t ws_route = {
@@ -43,10 +49,13 @@ void WebSocketHandler::RegisterRoute(httpd_handle_t server)
 // Client tracking
 // ──────────────────────────────────────────────────────────────
 
-bool WebSocketHandler::AddWsClient(int fd)
+bool WebSocketHandler::AddWsClient(int fd, ConsoleManager& console)
 {
     bool authed = !(auth_ && auth_->AuthRequired());   // empty password ⇒ authed at connect
-    return registry_.add(fd, authed, esp_timer_get_time()) != nullptr;
+    WsConnection* c = registry_.add(fd, authed, esp_timer_get_time());
+    if (!c) return false;
+    c->logCursor = console.Tip();
+    return true;
 }
 
 void WebSocketHandler::RemoveWsClient(int fd)
@@ -65,45 +74,62 @@ void WebSocketHandler::OnClientDisconnected(int fd)
     RemoveWsClient(fd);
 }
 
-void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int len)
+void WebSocketHandler::PumpLogs(httpd_handle_t server, ConsoleManager& console)
 {
-    // Snapshot authed client fds under the registry lock, then send outside it.
-    // Holding the lock across send would deadlock when a broadcaster source
-    // (e.g. ConsoleManager) already holds its own mutex and httpd internals
-    // call back into us.
-    int clients[ConnectionRegistry::MAX];
+    // Snapshot fd and cursor under the registry lock, then send outside it.
+    // Holding the lock across a send would deadlock the moment httpd internals
+    // called back into us, which is why the old broadcast did the same.
+    struct Peer { int fd; uint32_t cursor; };
+    Peer peers[ConnectionRegistry::MAX];
     int count = 0;
     registry_.forEach([&](const WsConnection& c) {
-        if (c.authed && count < ConnectionRegistry::MAX) clients[count++] = c.fd;
+        if (c.authed && count < ConnectionRegistry::MAX)
+            peers[count++] = { c.fd, c.logCursor };
     });
+    if (count == 0) return;
 
-    // Broadcast as a binary channel chunk on the reserved broadcast channel 0,
-    // so the socket carries ONE uniform chunk format for replies and broadcasts
-    // alike (no TEXT frames). Clients allocate channel ids from 1, so 0 never
-    // collides with a command.
-    uint8_t buf[channel::HEADER_LEN + 256];
-    int cap = static_cast<int>(sizeof(buf) - channel::HEADER_LEN);
-    if (len > cap) len = cap;
-    channel::writeHeader(buf, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
-    memcpy(buf + channel::HEADER_LEN, json, len);
+    // Everything logged from here until this returns is a consequence of shipping
+    // logs, so it is stored but never shipped. Without this a dead socket feeds
+    // itself: the send fails, the failure logs, the log is sent, it fails.
+    ConsoleManager::DrainScope guard(console);
 
-    httpd_ws_frame_t frame = {};
-    frame.type = HTTPD_WS_TYPE_BINARY;
-    frame.payload = buf;
-    frame.len = channel::HEADER_LEN + len;
+    char json[ConsoleManager::JSON_CAP];
+    uint8_t frame[channel::HEADER_LEN + ConsoleManager::JSON_CAP];
 
-    LOCK(sendMutex_);
     for (int i = 0; i < count; i++)
     {
-        if (httpd_ws_send_frame_async(server, clients[i], &frame) != ESP_OK)
+        while (size_t n = console.ReadJson(peers[i].cursor, json, sizeof(json)))
         {
-            // DEBUG, not WARN. A browser that closes a tab or reloads takes its
-            // socket with it without a close frame, so the next broadcast to that
-            // fd fails — every page close produced two scary lines about a device
-            // that was working perfectly. Removing the client IS the handling.
-            ESP_LOGD(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
-            registry_.remove(clients[i]);
+            channel::writeHeader(frame, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+            memcpy(frame + channel::HEADER_LEN, json, n);
+
+            httpd_ws_frame_t ws = {};
+            ws.type = HTTPD_WS_TYPE_BINARY;
+            ws.payload = frame;
+            ws.len = channel::HEADER_LEN + n;
+
+            esp_err_t err;
+            {
+                LOCK(sendMutex_);
+                err = httpd_ws_send_frame_async(server, peers[i].fd, &ws);
+            }
+
+            if (err != ESP_OK)
+            {
+                // DEBUG, not WARN. A browser that closes a tab or reloads takes its
+                // socket with it without a close frame, so the next send to that fd
+                // fails - every page close produced two scary lines about a device
+                // that was working perfectly. Removing the client IS the handling.
+                ESP_LOGD(TAG, "log pump failed to fd=%d, removing", peers[i].fd);
+                registry_.remove(peers[i].fd);
+                peers[i].fd = -1;
+                break;
+            }
         }
+
+        // Write the cursor back, so this browser is not sent these lines twice.
+        if (peers[i].fd >= 0)
+            if (auto* c = registry_.find(peers[i].fd)) c->logCursor = peers[i].cursor;
     }
 }
 
@@ -121,7 +147,7 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         // (see AuthGate). esp_http_server has already sent the 101; we
         // only need a client slot. A full table (after reaping stale un-authed
         // sockets) refuses the upgrade so the client hits its reconnect loop.
-        if (!self->AddWsClient(httpd_req_to_sockfd(req)))
+        if (!self->AddWsClient(httpd_req_to_sockfd(req), *self->console_))
             return ESP_FAIL;
         return ESP_OK;
     }
@@ -175,7 +201,7 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
 
     // All inbound frames are processed single-threaded on the httpd task, so the
     // AuthGate below is the only writer of this connection's state (authed/key).
-    // Broadcast runs on another task and may reset (remove) a slot concurrently,
+    // The log pump runs on another task and may reset (remove) a slot concurrently,
     // but it only ever *clears* a slot — it never sets `authed` — so the auth gate
     // can't be defeated by that race, and a cleared slot reads as empty (self-
     // healing). If a worker task ever consumes these pointers (step 6), this needs

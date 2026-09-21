@@ -37,10 +37,6 @@ build can afford it."
 
 ConsoleManager* ConsoleManager::s_instance_ = nullptr;
 
-struct LogQueueItem {
-    char text[ConsoleManager::MAX_LINE_LEN];
-};
-
 ConsoleManager::ConsoleManager(StruxProvider& strux)
     : strux_(strux)
 {
@@ -63,12 +59,6 @@ void ConsoleManager::Init()
         lines_ = static_cast<char (*)[MAX_LINE_LEN]>(calloc(MAX_LINES, MAX_LINE_LEN));
     assert(lines_ && "Failed to allocate log buffer");
 
-    queue_ = xQueueCreate(QUEUE_DEPTH, sizeof(LogQueueItem));
-
-    broadcastTask_.Init("ConsoleBroadcast", 5, 4096);
-    broadcastTask_.SetHandler([this]() { BroadcastTaskLoop(); });
-    broadcastTask_.Run();
-
     esp_log_set_vprintf(&LogOutput);
 
     // ConsoleManager initializes before CommandManager::Init() — fine by
@@ -77,12 +67,6 @@ void ConsoleManager::Init()
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized (capturing stdout)");
-}
-
-void ConsoleManager::SetBroadcastCallback(BroadcastFunc func, void* ctx)
-{
-    broadcastFunc_ = func;
-    broadcastCtx_ = ctx;
 }
 
 int ConsoleManager::LogOutput(const char* fmt, va_list args)
@@ -129,56 +113,100 @@ void ConsoleManager::FlushLine()
     lineBuf_[lineLen_] = '\0';
 
     StoreLine(lineBuf_, lineLen_);
-
-    // See broadcastTaskHandle_: anything logged while a broadcast is in flight is a
-    // side effect of that broadcast, and queueing it is what turns one dead socket into
-    // a flood. It is still stored above, so `log list` and the serial console keep it.
-    if (queue_ && xTaskGetCurrentTaskHandle() != broadcastTaskHandle_.load())
-    {
-        LogQueueItem item = {};
-        snprintf(item.text, sizeof(item.text), "%s", lineBuf_);
-        xQueueSend(queue_, &item, 0);
-    }
-
     lineLen_ = 0;
 }
 
 void ConsoleManager::StoreLine(const char* line, int32_t len)
 {
+    // Asked BEFORE the lock, because it is a question about the calling task and
+    // not about the ring: a line raised while this task is shipping logs is a side
+    // effect of that shipping, and sending it would produce the next one.
+    const bool selfInflicted = InDrain();
+
     LOCK(mutex_);
     if (len >= MAX_LINE_LEN) len = MAX_LINE_LEN - 1;
     memcpy(lines_[head_], line, len);
     lines_[head_][len] = '\0';
+    selfInflicted_[head_] = selfInflicted;
     head_ = (head_ + 1) % MAX_LINES;
     if (count_ < MAX_LINES) count_++;
+    seq_++;
 }
 
-void ConsoleManager::BroadcastTaskLoop()
+// ──────────────────────────────────────────────────────────────
+// Consumers: a cursor, and nothing else
+// ──────────────────────────────────────────────────────────────
+
+uint32_t ConsoleManager::Tip() const
 {
-    LogQueueItem item;
+    LOCK(mutex_);
+    return seq_;
+}
 
-    // Learned here rather than from Task, which does not expose its handle — and this
-    // is the one place that is certainly running on it.
-    broadcastTaskHandle_.store(xTaskGetCurrentTaskHandle());
+size_t ConsoleManager::ReadJson(uint32_t& cursor, char* out, size_t cap)
+{
+    char line[MAX_LINE_LEN];
 
-    while (true)
+    for (;;)
     {
-        if (xQueueReceive(queue_, &item, portMAX_DELAY) != pdTRUE)
-            continue;
+        {
+            LOCK(mutex_);
 
-        if (!broadcastFunc_)
-            continue;
+            // Fell off the back of the ring while this consumer was busy. Jumping
+            // to the oldest line still held is the ring working as intended: a slow
+            // consumer loses the middle, not its place.
+            const uint32_t oldest = seq_ - static_cast<uint32_t>(count_);
+            if (cursor < oldest) cursor = oldest;
+            if (cursor >= seq_) return 0;
 
-        char jsonBuf[MAX_LINE_LEN + 32];
-        BufferStream stream(jsonBuf, sizeof(jsonBuf));
+            const uint32_t back = seq_ - cursor;   // 1 = the line just stored
+            const int32_t slot =
+                (head_ - static_cast<int32_t>(back) + MAX_LINES * 2) % MAX_LINES;
+            cursor++;
+
+            if (selfInflicted_[slot]) continue;    // see DrainScope
+            snprintf(line, sizeof(line), "%s", lines_[slot]);
+        }
+
+        // Escaping happens outside the lock and in ONE place, so both drain sites
+        // ship byte-identical records and neither of them owns the format.
+        BufferStream stream(out, cap);
         JsonWriter json(stream);
         json.beginObject();
-        json.field("log", item.text);
+        json.field("log", line);
         json.endObject();
-
-        broadcastFunc_(stream.data(), stream.length(), broadcastCtx_);
+        return stream.length();
     }
 }
+
+void ConsoleManager::EnterDrain()
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    for (auto& slot : drainers_)
+    {
+        TaskHandle_t expected = nullptr;
+        if (slot.compare_exchange_strong(expected, self)) return;
+    }
+}
+
+void ConsoleManager::ExitDrain()
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    for (auto& slot : drainers_)
+    {
+        TaskHandle_t expected = self;
+        if (slot.compare_exchange_strong(expected, nullptr)) return;
+    }
+}
+
+bool ConsoleManager::InDrain() const
+{
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    for (const auto& slot : drainers_)
+        if (slot.load() == self) return true;
+    return false;
+}
+
 
 void ConsoleManager::WriteHistory(ReplyObject& resp) const
 {

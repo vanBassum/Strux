@@ -92,17 +92,6 @@ public:
 
     void Init();
 
-    /// Push a log line down the relay pipe as a channel-0 broadcast chunk — the
-    /// same shape the local socket sends, so a relayed frontend gets live logs
-    /// with no protocol difference. No-op while disconnected or disabled.
-    void BroadcastLog(const char* json, int len);
-
-    /// Push one line of Influx line protocol on the telemetry channel. Same mechanism
-    /// as BroadcastLog and the same lack of guarantees — fire and forget, no reply — but
-    /// a different reserved channel, because the server sends these to a database
-    /// rather than to every attached browser. False when it could not go out.
-    bool BroadcastTelemetry(const char* line, int len);
-
     bool IsConnected() const { return linkUp_; }
 
     /// The id this device registers under. Telemetry tags points with it so a
@@ -149,6 +138,18 @@ private:
     // handed between two tasks. One task, one buffer.
     uint8_t channelFrame_[channel::HEADER_LEN + CHANNEL_WINDOW];
     uint8_t channelInbound_[channel::HEADER_LEN + INBOUND_WINDOW];
+
+    /// How much telemetry goes in one frame. Comfortably inside the 4096 window and
+    /// enough for a dozen points, which is more than a drain ever finds at once.
+    static constexpr size_t TELEMETRY_BATCH = 1024;
+
+    /// Where this pipe has got to in the console ring.
+    uint32_t logCursor_ = 0;
+
+    /// Ship whatever the console and telemetry rings are holding. Called from the
+    /// read loop between requests, never from a producer's task.
+    void DrainConsole();
+    void DrainTelemetry();
 
     void BuildUri();
 

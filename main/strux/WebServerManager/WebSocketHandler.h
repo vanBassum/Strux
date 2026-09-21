@@ -8,6 +8,7 @@
 
 class CommandManager;
 class Authenticator;
+class ConsoleManager;
 
 class WebSocketHandler {
     static constexpr const char* TAG = "WebSocketHandler";
@@ -15,10 +16,18 @@ class WebSocketHandler {
 public:
     void SetCommandManager(CommandManager& commandManager);
     void SetAuth(Authenticator& auth);
+    void SetConsole(ConsoleManager& console);
 
     void RegisterRoute(httpd_handle_t server);
 
-    void Broadcast(httpd_handle_t server, const char* json, int len);
+    /// Ship whatever each authenticated browser has not seen yet, from the console
+    /// ring straight to its socket. Called by WebServerManager's pump task.
+    ///
+    /// The LAN transport has no task of its own -- esp_http_server calls into this
+    /// class only when a frame arrives -- so something has to drive the drain, and
+    /// that is the one place the relay and this differ. The relay drains inside its
+    /// own read loop; here a pump walks the slots.
+    void PumpLogs(httpd_handle_t server, ConsoleManager& console);
 
     void OnClientDisconnected(int fd);
 
@@ -26,6 +35,7 @@ private:
     // The channel sink: CommandManager dispatches, this transport only frames.
     CommandManager* commandManager_ = nullptr;
     Authenticator* auth_ = nullptr;
+    ConsoleManager* console_ = nullptr;
 
     // Serializes ALL outgoing frame writes. Broadcasts run on the
     // ConsoleManager task while command responses are written by the
@@ -44,7 +54,7 @@ private:
     void TouchClient(int fd);
 
     /// False when the client table is full (after reaping stale un-authed slots).
-    bool AddWsClient(int fd);
+    bool AddWsClient(int fd, ConsoleManager& console);
 
     // Channel reply flush window (off the httpd-task stack; reused, single
     // channel at a time). NOT payload-proportional — a small batch buffer that

@@ -9,18 +9,25 @@ Last updated 2026-09-21.
 
 ## Now
 
-**Replacing `Session` with a Connection + Channel protocol.** The plan and its phases
-are [issue #38](https://github.com/vanBassum/Strux/issues/38); only what is in flight
-belongs here. Phase 0 (terminology, dead code) and Phase 1 (channel table, one frame
-path for both transports, foreign frames dispatched instead of destroyed) are committed
-and build. **Neither is flashed yet** — the two things to drive on hardware are an
-upload that survives a command arriving mid-body, and a handler that returns early
-leaving residue on the local WebSocket, which is the bug Phase 1 fixes there.
-Phase 2 (log and telemetry rings, which is where #24 dies) is next; the wire does not
-break until Phase 3.
-→ [`reasoning/…three-reserved-ids…`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
-[`reasoning/…head-of-line-blocking…`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
-[`reasoning/…not-a-flag-day…`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md)
+**Replacing `Session` with a Connection + Channel protocol.** Plan and phases are
+[issue #38](https://github.com/vanBassum/Strux/issues/38). **Phases 0, 1 and 2 are in,
+flashed and driven on the bench devkit** (0.0.8 at 192.168.50.202):
+
+- Phase 1 verified by driving both failure modes on hardware. An upload of the whole
+  1.26 MB image completes with a foreign frame injected mid-body (the intruder is
+  refused `busy`), and residue after an early handler return is discarded rather than
+  parsed as commands. The same script against the pre-fix build shows the old behaviour
+  as data -- the upload dies with `REJECT expected: <category> <command>` and the device
+  answers a storm of `unknown command`.
+- Phase 2 verified live: log lines reach two browsers through independent cursors,
+  `log list` is unchanged, telemetry ships in batches, no reboot.
+
+Next is Phase 3, which breaks the wire. Until then a device on the old firmware still
+talks to the relay unchanged.
+→ [`reasoning/...three-reserved-ids...`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
+[`reasoning/...head-of-line-blocking...`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
+[`reasoning/...not-a-flag-day...`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md),
+[`reasoning/...one-callback-slot...`](reasoning/2026-09-21-12h40-a-fan-out-is-what-one-callback-slot-costs.md)
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the

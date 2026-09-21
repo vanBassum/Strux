@@ -2,7 +2,6 @@
 #include "ConsoleManager.h"
 #include "SettingsManager.h"
 #include "CommandManager.h"
-#include "RelayManager.h"
 #include "JsonHelpers.h"
 #include "ResumeTokens.h"
 
@@ -17,9 +16,9 @@ static constexpr const char* TAG = "WebServerManager";
 //
 // `httpd_config_t::close_fn` is a plain function pointer with signature
 // `(httpd_handle_t, int fd)` — no user pointer, unlike every other callback here,
-// which is why this one alone needs a static and `SetBroadcastCallback` below does
-// not. A capturing lambda cannot convert to that pointer, so the `this` has to come
-// from somewhere outside the call.
+// which is why this one alone needs a static. Every other callback here takes a
+// user pointer; a capturing lambda cannot convert to this one, so the `this` has to
+// come from somewhere outside the call.
 //
 // Safe in practice for the reason a singleton usually is not: there is exactly one
 // WebServerManager, it is owned by StruxContext for the life of the process, and
@@ -45,6 +44,7 @@ void WebServerManager::Init()
     s_instance_ = this;
 
     wsHandler_.SetCommandManager(strux_.getCommandManager());
+    wsHandler_.SetConsole(strux_.getConsoleManager());
 
     strux_.getSettingsManager().Register({ &webPassword_ });
     auth_.Init();   // snapshot the stored password (after registration)
@@ -55,15 +55,28 @@ void WebServerManager::Init()
 
     strux_.getCommandManager().Register(this, commands_);
 
-    // Wire console broadcast to WS clients
-    strux_.getConsoleManager().SetBroadcastCallback(
-        [](const char* json, int32_t len, void* ctx) {
-            static_cast<WebServerManager*>(ctx)->Broadcast(json, len);
-        },
-        this);
+    // Log delivery is a PULL now: every connection holds a cursor into the console
+    // ring and this task walks them. What that removes is not the callback so much
+    // as the fan-out that hung off it -- this manager used to hand each line to its
+    // own clients AND to RelayManager, which is a web server reaching sideways into
+    // a peer for no reason except that ConsoleManager had room for one subscriber.
+    // The relay now drains the same ring from its own read loop and neither knows
+    // the other exists.
+    consolePump_.Init("ConsolePump", 4, 3072);
+    consolePump_.SetHandler([this]() { ConsolePumpLoop(); });
+    consolePump_.Run();
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");
+}
+
+void WebServerManager::ConsolePumpLoop()
+{
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(PUMP_INTERVAL_MS));
+        if (server_) wsHandler_.PumpLogs(server_, strux_.getConsoleManager());
+    }
 }
 
 void WebServerManager::StartServer()
@@ -107,17 +120,6 @@ void WebServerManager::RegisterRoutes()
     // device interaction is a channel on the one socket.
     wsHandler_.RegisterRoute(server_);
     staticFileHandler_.RegisterRoute(server_);
-}
-
-void WebServerManager::Broadcast(const char* json, int len)
-{
-    if (server_)
-        wsHandler_.Broadcast(server_, json, len);
-
-    // ConsoleManager holds a single broadcast callback, so the fan-out to the
-    // second transport happens here: relayed frontends get the same live log
-    // stream. No-op while the relay is disabled or disconnected.
-    strux_.getRelayManager().BroadcastLog(json, len);
 }
 
 // ──────────────────────────────────────────────────────────────

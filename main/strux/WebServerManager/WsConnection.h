@@ -16,6 +16,11 @@ struct WsConnection {
     // sockets share those because httpd serves them one at a time.
     ChannelTable channels;
 
+    // Where this browser has got to in the console ring. Set to the tip when the
+    // slot is claimed, so a connecting tab gets live output and not a replay --
+    // history is what `log list` is for.
+    uint32_t logCursor = 0;
+
     bool active() const { return fd != 0; }
     int64_t age(int64_t now) const { return now - connectedAt; }
     void authenticate(const char* k)
@@ -25,7 +30,7 @@ struct WsConnection {
     }
     void reset()
     {
-        fd = 0; authed = false; key[0] = 0; connectedAt = 0;
+        fd = 0; authed = false; key[0] = 0; connectedAt = 0; logCursor = 0;
         channels.Reset();
     }
 };

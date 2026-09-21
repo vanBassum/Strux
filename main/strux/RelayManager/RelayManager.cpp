@@ -1,6 +1,8 @@
 #include "RelayManager.h"
 #include "SettingsManager.h"
 #include "NetworkManager.h"
+#include "ConsoleManager.h"
+#include "TelemetryManager.h"
 #include "WebServerManager.h"
 #include "CommandManager.h"
 #include "AuthGate.h"
@@ -368,6 +370,12 @@ void RelayManager::TaskLoop()
         // or the next keepalive comes due, whichever happens first. Mid-request the
         // same read happens under the channel, one layer down (RelayTransport) —
         // same socket, same task, which is the property that removed the queue.
+        // Between requests is the only safe point: mid-request this task is inside
+        // a handler that owns the socket, which is v1's accepted head-of-line
+        // blocking. A long upload delays logs; it does not lose them.
+        DrainConsole();
+        DrainTelemetry();
+
         int32_t untilPing = static_cast<int32_t>(nextPingAt - NowMs());
         if (untilPing < 0) untilPing = 0;
 
@@ -420,6 +428,8 @@ void RelayManager::OnConnected()
     // even the login page that would have unlocked it.
     conn_.authed = true;
 
+    // A reconnect is not a reason to replay: start where the ring is now.
+    logCursor_ = strux_.getConsoleManager().Tip();
     linkUp_ = true;
 
     // Says WHY the pipe is open, which is no longer "nobody set a password": this
@@ -531,49 +541,65 @@ void RelayManager::CheckStackHeadroom()
 }
 
 // ──────────────────────────────────────────────────────────────
-// Log fan-out
+// Passive streams
+//
+// Both are drained from the read loop, between requests, which is the whole change:
+// the console task and whichever task took a measurement used to call in here and
+// block on RelaySocket::sendMutex_. Every LOCK() is under ContextLock, so a stalled
+// TLS write turned three producers into a reboot. Now one task writes this socket.
+//
+// Neither drain logs on failure. A line raised here would be stored, drained, sent,
+// fail, and log again; ConsoleManager::DrainScope covers the lines this code causes
+// further down the stack, and saying nothing ourselves covers the rest.
 // ──────────────────────────────────────────────────────────────
 
-void RelayManager::BroadcastLog(const char* json, int len)
+void RelayManager::DrainConsole()
 {
     if (!linkUp_) return;
 
-    // Same channel-0 chunk the local socket broadcasts. This runs on the console
-    // task, so it can collide with a channel's reply on the relay task —
-    // RelaySocket's send lock is what keeps a frame from being split in half.
-    uint8_t buf[channel::HEADER_LEN + 256];
-    int cap = static_cast<int>(sizeof(buf) - channel::HEADER_LEN);
-    if (len > cap) len = cap;
-    if (len < 0) return;
+    auto& console = strux_.getConsoleManager();
+    ConsoleManager::DrainScope guard(console);
 
-    channel::writeHeader(buf, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
-    memcpy(buf + channel::HEADER_LEN, json, static_cast<size_t>(len));
+    char json[ConsoleManager::JSON_CAP];
+    uint8_t frame[channel::HEADER_LEN + ConsoleManager::JSON_CAP];
 
-    // Short timeout and no logging on failure — this runs on the console
-    // broadcast task, and a log line here would feed itself.
-    socket_.SendBinary(buf, channel::HEADER_LEN + static_cast<size_t>(len),
-                       BROADCAST_TIMEOUT_MS);
+    while (size_t n = console.ReadJson(logCursor_, json, sizeof(json)))
+    {
+        channel::writeHeader(frame, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+        memcpy(frame + channel::HEADER_LEN, json, n);
+        if (!socket_.SendBinary(frame, channel::HEADER_LEN + n, BROADCAST_TIMEOUT_MS))
+            return;
+    }
 }
 
-bool RelayManager::BroadcastTelemetry(const char* line, int len)
+void RelayManager::DrainTelemetry()
 {
-    if (!linkUp_) return false;
-    if (len <= 0) return false;
+    if (!linkUp_) return;
 
-    // Sized for one line, which TelemetryManager already bounded. A point that does
-    // not fit here would be a formatting bug there, so it is refused rather than cut.
-    uint8_t buf[channel::HEADER_LEN + 384];
-    if (static_cast<size_t>(len) > sizeof(buf) - channel::HEADER_LEN)
+    auto& telemetry = strux_.getTelemetryManager();
+    if (!telemetry.IsEnabled()) return;
+
+    char batch[TELEMETRY_BATCH];
+    uint8_t frame[channel::HEADER_LEN + TELEMETRY_BATCH];
+
+    for (;;)
     {
-        ESP_LOGW(TAG, "telemetry line too long (%d) - dropped", len);
-        return false;
+        uint32_t lines = 0;
+        const size_t n = telemetry.Drain(batch, sizeof(batch), lines);
+        if (n == 0) return;
+
+        channel::writeHeader(frame, channel::TELEMETRY_CHANNEL, channel::FLAG_FINAL);
+        memcpy(frame + channel::HEADER_LEN, batch, n);
+
+        if (socket_.SendBinary(frame, channel::HEADER_LEN + n, BROADCAST_TIMEOUT_MS))
+            telemetry.ReportSent(lines);
+        else
+        {
+            // Drain is destructive, so a failed batch is gone. Counted rather than
+            // requeued: telemetry is explicitly lossy, and a retry queue is the
+            // thing this ring exists to avoid.
+            telemetry.ReportDropped(lines);
+            return;
+        }
     }
-
-    channel::writeHeader(buf, channel::TELEMETRY_CHANNEL, channel::FLAG_FINAL);
-    memcpy(buf + channel::HEADER_LEN, line, static_cast<size_t>(len));
-
-    // Same send lock as everything else on this socket: this is called from whichever
-    // task took the measurement, which is not the relay task.
-    return socket_.SendBinary(buf, channel::HEADER_LEN + static_cast<size_t>(len),
-                              BROADCAST_TIMEOUT_MS);
 }
