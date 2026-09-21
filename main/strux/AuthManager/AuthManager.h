@@ -9,8 +9,8 @@
 // ──────────────────────────────────────────────────────────────
 // The device's credential authority, as a manager of its own.
 //
-// It owns the password setting, the Authenticator (password check, resume-key
-// table) and the `auth` command category. Nothing here is a transport:
+// It owns the password setting, the Authenticator (password check, rate limit,
+// resume-key table) and the `auth` command category. Nothing here is a transport:
 // a transport borrows the Authenticator through the provider and puts an AuthGate
 // in front of its own connection state.
 //
@@ -79,7 +79,8 @@ private:
           "answered. With no web password set - the default - it never does." },
         { "auth", "login",  &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
           "Authenticate this connection with the device's web password. On success "
-          "the reply carries a channel key that 'auth resume' takes." },
+          "the reply carries a channel key that 'auth resume' takes. Failed attempts "
+          "are rate limited, and a refusal says which of the two it was." },
         { "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
           "Re-authenticate a reconnected client with the channel key a previous "
           "'auth login' handed out, instead of the password again." },
