@@ -9,21 +9,27 @@ Last updated 2026-09-21.
 
 ## Now
 
-**Replacing `Session` with a Connection + Channel protocol.** Plan and phases are
-[issue #38](https://github.com/vanBassum/Strux/issues/38). **Phases 0, 1 and 2 are in,
-flashed and driven on the bench devkit** (0.0.8 at 192.168.50.202):
+**The Connection + Channel protocol has replaced `Session`.** Plan and phases are
+[issue #38](https://github.com/vanBassum/Strux/issues/38). Phases 0-3 are in.
+**Phase 3 broke the wire**, deliberately.
 
-- Phase 1 verified by driving both failure modes on hardware. An upload of the whole
-  1.26 MB image completes with a foreign frame injected mid-body (the intruder is
-  refused `busy`), and residue after an early handler return is discarded rather than
-  parsed as commands. The same script against the pre-fix build shows the old behaviour
-  as data -- the upload dies with `REJECT expected: <category> <command>` and the device
-  answers a storm of `unknown command`.
-- Phase 2 verified live: log lines reach two browsers through independent cursors,
-  `log list` is unchanged, telemetry ships in batches, no reboot.
+The device and the browser are peers: a CONTROL handshake (u8 version, u64 nonce) the
+moment the transport is up, nonce-decided id halves, OPEN and RESET, no reserved ids at
+all. Logs and telemetry are channels the device opens and names; hello is gone and
+identity is `system info`. Verified on the bench devkit: handshake settles with disjoint
+halves, a command is an ordinary OPEN|FINAL channel, the device opens `log stream` on
+0x8000 and records arrive, a frame without OPEN for an unknown id is dropped, a second
+OPEN during an upload is RESET `busy`, an in-band RESET cancel leaves the connection
+serving, and a peer claiming protocol 99 is refused.
 
-Next is Phase 3, which breaks the wire. Until then a device on the old firmware still
-talks to the relay unchanged.
+**Blocking: the relay is written and builds but is NOT deployed.** Until it is, a device
+on this firmware connects, sends CONTROL, gets no answer and sits in HANDSHAKE -- seen on
+the bench as `channel 32768 before READY - dropped`. Harmless, and the relay path does
+not work. The relay keeps a legacy path chosen by a device's first frame, so Lablr and
+Comble need no flag day. Release process: tag `v*`, then `make up stack=strux-relay`.
+
+**Also unverified:** the relay path end to end, and the browser UI in an actual browser
+(the wire is driven by a script, not by the bundle).
 → [`reasoning/...three-reserved-ids...`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
 [`reasoning/...head-of-line-blocking...`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
 [`reasoning/...not-a-flag-day...`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md),
