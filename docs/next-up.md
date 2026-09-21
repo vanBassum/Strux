@@ -9,27 +9,29 @@ Last updated 2026-09-21.
 
 ## Now
 
-**The Connection + Channel protocol has replaced `Session`.** Plan and phases are
-[issue #38](https://github.com/vanBassum/Strux/issues/38). Phases 0-3 are in.
-**Phase 3 broke the wire**, deliberately.
+**The Connection + Channel protocol has replaced `Session`, and it is live.** Plan and
+phases are [issue #38](https://github.com/vanBassum/Strux/issues/38). Phases 0-3 are in;
+the wire break is done and **relay v0.8.2 is deployed**.
 
-The device and the browser are peers: a CONTROL handshake (u8 version, u64 nonce) the
-moment the transport is up, nonce-decided id halves, OPEN and RESET, no reserved ids at
-all. Logs and telemetry are channels the device opens and names; hello is gone and
-identity is `system info`. Verified on the bench devkit: handshake settles with disjoint
-halves, a command is an ordinary OPEN|FINAL channel, the device opens `log stream` on
-0x8000 and records arrive, a frame without OPEN for an unknown id is dropped, a second
-OPEN during an upload is RESET `busy`, an in-band RESET cancel leaves the connection
-serving, and a peer claiming protocol 99 is refused.
+Device and browser are peers: a CONTROL handshake (u8 version, u64 nonce) the moment the
+transport is up, nonce-decided id halves, OPEN and RESET, and no reserved ids at all.
+Logs and telemetry are channels the device opens and names; hello is gone and identity is
+`system info`. Verified 7/7 both directly over the LAN and through the deployed relay:
+handshake to READY, disjoint halves, command, device-opened log stream, stale non-OPEN
+frame dropped, `RESET "busy"` on a concurrent OPEN, in-band cancel that leaves the
+connection serving, and protocol 99 refused. A real fork device on old firmware
+(`PSU 1 Chlorate`, 0.0.6) still answers through the same relay on the legacy wire, so no
+fork needs a flag day.
 
-**Blocking: the relay is written and builds but is NOT deployed.** Until it is, a device
-on this firmware connects, sends CONTROL, gets no answer and sits in HANDSHAKE -- seen on
-the bench as `channel 32768 before READY - dropped`. Harmless, and the relay path does
-not work. The relay keeps a legacy path chosen by a device's first frame, so Lablr and
-Comble need no flag day. Release process: tag `v*`, then `make up stack=strux-relay`.
+Deploying found two relay bugs the build could not: a RESET queued behind a gate wait
+(v0.8.1) and residue taking the pipe for fifteen seconds (v0.8.2). Both fixed and live.
 
-**Also unverified:** the relay path end to end, and the browser UI in an actual browser
-(the wire is driven by a script, not by the bundle).
+**Outstanding, and the one thing left before Phase 3 is closed: nobody has opened the new
+UI in a real browser.** The wire is driven by a script that reimplements the peer;
+the shipped bundle is typechecked but the actual page -- handshake on load, READY gating,
+the Console fed by a device-opened stream, an upload and its cancel button -- has not been
+looked at. `/devices/{id}/ws` sits behind Authentik, so it needs someone logged in.
+Phase 4 is not started.
 → [`reasoning/...three-reserved-ids...`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
 [`reasoning/...head-of-line-blocking...`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
 [`reasoning/...not-a-flag-day...`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md),
