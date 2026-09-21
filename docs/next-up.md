@@ -5,9 +5,22 @@ lands or is dropped — never ticked off in place. Everything else lives in
 GitHub issues (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
-Last updated 2026-09-18.
+Last updated 2026-09-21.
 
 ## Now
+
+**Replacing `Session` with a Connection + Channel protocol.** The plan and its phases
+are [issue #38](https://github.com/vanBassum/Strux/issues/38); only what is in flight
+belongs here. Phase 0 (terminology, dead code) and Phase 1 (channel table, one frame
+path for both transports, foreign frames dispatched instead of destroyed) are committed
+and build. **Neither is flashed yet** — the two things to drive on hardware are an
+upload that survives a command arriving mid-body, and a handler that returns early
+leaving residue on the local WebSocket, which is the bug Phase 1 fixes there.
+Phase 2 (log and telemetry rings, which is where #24 dies) is next; the wire does not
+break until Phase 3.
+→ [`reasoning/…three-reserved-ids…`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
+[`reasoning/…head-of-line-blocking…`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
+[`reasoning/…not-a-flag-day…`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md)
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the
