@@ -1,5 +1,6 @@
 #include "TelemetryManager.h"
 #include "SettingsManager.h"
+#include "CommandManager.h"
 #include "RelayManager.h"
 #include "NetworkManager.h"
 #include "DateTime.h"
@@ -28,6 +29,12 @@ void TelemetryManager::Init()
     }
 
     strux_.getSettingsManager().Register({ &enabled_, &intervalSec_ });
+
+    // Before the disabled early-return, deliberately: `telemetry stats` answering
+    // "enabled: false" is the whole point of asking it on a device whose graph is
+    // empty. A command that disappears when the thing it reports on is off cannot
+    // report that it is off.
+    strux_.getCommandManager().Register(this, commands_);
 
     if (!enabled_.Get())
     {
@@ -79,6 +86,27 @@ void TelemetryManager::SampleVitals()
         p.Field("rssi", static_cast<int32_t>(rssi));
 
     p.Commit();
+}
+
+// ──────────────────────────────────────────────────────────────
+// Commands
+// ──────────────────────────────────────────────────────────────
+
+// Why this exists: an empty graph has two causes that look identical from Influx —
+// the device never formatted a point, or it formatted them all and could not send
+// one. The counters already separate those; nothing read them. `relayConnected` is
+// here because it is the reason `dropped` climbs in practice.
+RequestError TelemetryManager::Cmd_Stats(CommandContext& ctx)
+{
+    RETURN_IF_ERROR(ctx.readArgs());
+
+    auto resp = ctx.reply.object();
+    resp.field("enabled", enabled_.Get());
+    resp.field("intervalSec", intervalSec_.Get());
+    resp.field("sent", sent_);
+    resp.field("dropped", dropped_);
+    resp.field("relayConnected", strux_.getRelayManager().IsConnected());
+    return RequestError::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────

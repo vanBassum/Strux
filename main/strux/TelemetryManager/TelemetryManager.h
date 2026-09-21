@@ -4,6 +4,7 @@
 #include "InitState.h"
 #include "TypedSettings.h"
 #include "SessionProtocol.h"
+#include "CommandEntry.h"
 #include "Task.h"
 
 #include <cstddef>
@@ -104,6 +105,13 @@ public:
     uint32_t Dropped() const { return dropped_; }
 
 private:
+    // ── Commands (registered with CommandManager in Init) ──
+    RequestError Cmd_Stats(CommandContext& ctx);
+
+    inline static CommandEntry commands_[] = {
+        { "telemetry", "stats", &InvokeCommand<&TelemetryManager::Cmd_Stats> },
+    };
+
     StruxProvider& strux_;
     InitState initState_;
     Task task_;
@@ -129,7 +137,14 @@ private:
     // Keys are `telem.` and not `telemetry.` because an NVS key is at most 15 chars,
     // and Register() asserts on that at RUNTIME — `telemetry.enabled` is 17 and boots
     // straight into a reset loop. Nothing catches it at compile time.
-    inline static BoolSetting enabled_{ "telem.enabled", "Telemetry Enabled", false };
+    //
+    // Read once, in Init(): the task is only started when this is true, so turning
+    // telemetry on takes a reboot. Deliberate — the alternative is a 3 KB task
+    // sleeping forever on every device that never enables telemetry, which is most of
+    // them. The label carries that, because a switch that appears to work and does
+    // nothing is worse than one that says what it costs.
+    inline static BoolSetting enabled_{ "telem.enabled",
+                                        "Telemetry Enabled (needs reboot)", false };
     inline static UInt32Setting intervalSec_{ "telem.interval",
                                              "Telemetry Interval (s)", 60 };
 };
