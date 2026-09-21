@@ -2,7 +2,7 @@
 #include "CommandManager.h"
 #include "Authenticator.h"
 #include "AuthGate.h"
-#include "WsSessionLink.h"   // the concrete SessionLink for this transport
+#include "WsTransport.h"   // the concrete Transport for this transport
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -11,8 +11,8 @@
 static constexpr const char* TAG = "WebSocketHandler";
 
 // The inbound frame-drain primitive (the private httpd_ws_get_frame_type wart)
-// now lives in WsSessionLink::RecvChunk; Session::read() pulls streamed request
-// bodies through it. See WsSessionLink.h.
+// now lives in WsTransport::RecvChunk; Channel::read() pulls streamed request
+// bodies through it. See WsTransport.h.
 
 void WebSocketHandler::SetCommandManager(CommandManager& commandManager)
 {
@@ -76,20 +76,20 @@ void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int le
         if (c.authed && count < ConnectionRegistry::MAX) clients[count++] = c.fd;
     });
 
-    // Broadcast as a binary session chunk on the reserved broadcast session 0,
+    // Broadcast as a binary channel chunk on the reserved broadcast channel 0,
     // so the socket carries ONE uniform chunk format for replies and broadcasts
-    // alike (no TEXT frames). Clients allocate session ids from 1, so 0 never
+    // alike (no TEXT frames). Clients allocate channel ids from 1, so 0 never
     // collides with a command.
-    uint8_t buf[session::HEADER_LEN + 256];
-    int cap = static_cast<int>(sizeof(buf) - session::HEADER_LEN);
+    uint8_t buf[channel::HEADER_LEN + 256];
+    int cap = static_cast<int>(sizeof(buf) - channel::HEADER_LEN);
     if (len > cap) len = cap;
-    session::writeHeader(buf, session::BROADCAST_SESSION, session::FLAG_FINAL);
-    memcpy(buf + session::HEADER_LEN, json, len);
+    channel::writeHeader(buf, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+    memcpy(buf + channel::HEADER_LEN, json, len);
 
     httpd_ws_frame_t frame = {};
     frame.type = HTTPD_WS_TYPE_BINARY;
     frame.payload = buf;
-    frame.len = session::HEADER_LEN + len;
+    frame.len = channel::HEADER_LEN + len;
 
     LOCK(sendMutex_);
     for (int i = 0; i < count; i++)
@@ -102,46 +102,6 @@ void WebSocketHandler::Broadcast(httpd_handle_t server, const char* json, int le
             // that was working perfectly. Removing the client IS the handling.
             ESP_LOGD(TAG, "Broadcast failed to fd=%d, removing", clients[i]);
             registry_.remove(clients[i]);
-        }
-    }
-}
-
-void WebSocketHandler::BroadcastBinary(httpd_handle_t server, const uint8_t* data, size_t len)
-{
-    int clients[ConnectionRegistry::MAX];
-    int count = 0;
-    registry_.forEach([&](const WsConnection& c) {
-        if (c.authed && count < ConnectionRegistry::MAX) clients[count++] = c.fd;
-    });
-
-    httpd_ws_frame_t frame = {};
-    frame.type = HTTPD_WS_TYPE_BINARY;
-    frame.payload = const_cast<uint8_t*>(data);
-    frame.len = len;
-
-    LOCK(sendMutex_);
-    for (int i = 0; i < count; i++)
-    {
-        int fd = clients[i];
-
-        if (httpd_ws_send_frame_async(server, fd, &frame) == ESP_OK)
-        {
-            if (auto* c = registry_.find(fd)) c->consecBinFails = 0;
-            continue;
-        }
-
-        // Push failed — usually EAGAIN (TCP send buffer momentarily full) under
-        // load. Don't remove the client on a single failure; the socket-close
-        // callback cleans up real disconnects. Only after many consecutive
-        // failures do we give up on this client.
-        if (auto* c = registry_.find(fd))
-        {
-            if (++c->consecBinFails >= MAX_BIN_FAILS)
-            {
-                ESP_LOGW(TAG, "BroadcastBinary giving up on fd=%d after %d consecutive failures",
-                         fd, c->consecBinFails);
-                registry_.remove(fd);
-            }
         }
     }
 }
@@ -177,7 +137,7 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         return ret;
     }
 
-    // Any inbound frame (heartbeat included) keeps the session alive —
+    // Any inbound frame (heartbeat included) keeps the channel alive —
     // an open tab never logs out; see spec.
     self->TouchClient(httpd_req_to_sockfd(req));
 
@@ -189,27 +149,27 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 
     if (frame.type == HTTPD_WS_TYPE_BINARY)
     {
-        if (frame.len >= session::HEADER_LEN)
+        if (frame.len >= channel::HEADER_LEN)
             self->HandleBinary(req, self->inboundFrame_, frame.len);
         return ESP_OK;
     }
 
-    // Inbound TEXT frames are no longer used: requests are binary session
+    // Inbound TEXT frames are no longer used: requests are binary channel
     // chunks and no client sends text. Ignore any stray text frame.
     return ESP_OK;
 }
 
 // ──────────────────────────────────────────────────────────────
-// Binary session transport. One inbound binary frame = one
-// session chunk; step-1 requests are a single chunk dispatched synchronously.
+// Binary channel transport. One inbound binary frame = one
+// channel chunk; step-1 requests are a single chunk dispatched synchronously.
 // ──────────────────────────────────────────────────────────────
 
 void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size_t len)
 {
-    uint16_t sid   = session::readU16(frame);
+    uint16_t sid   = channel::readU16(frame);
     uint8_t  flags = frame[2];
-    const uint8_t* payload = frame + session::HEADER_LEN;
-    size_t plen = len - session::HEADER_LEN;
+    const uint8_t* payload = frame + channel::HEADER_LEN;
+    size_t plen = len - channel::HEADER_LEN;
     int fd = httpd_req_to_sockfd(req);
 
     // All inbound frames are processed single-threaded on the httpd task, so the
@@ -228,31 +188,31 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
         // esp_http_server has already sent the 101. Returning silently left the
         // client holding an established socket, waiting out its timeout for a reply
         // that was never coming — every command swallowed, nothing logged. Refuse the
-        // session instead, so the failure lands at the caller rather than in a
+        // channel instead, so the failure lands at the caller rather than in a
         // timeout.
-        ESP_LOGW(TAG, "frame on fd=%d with no client slot - refusing session %u",
+        ESP_LOGW(TAG, "frame on fd=%d with no client slot - refusing channel %u",
                  fd, (unsigned)sid);
-        WsSessionLink link(req, sendMutex_);
-        Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-                  sessionInbound_, sizeof(sessionInbound_));
-        s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
+        WsTransport link(req, sendMutex_);
+        Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
+                  channelInbound_, sizeof(channelInbound_));
+        s.feedRequest(payload, plen, (flags & channel::FLAG_FINAL) != 0);
         s.reject("connection has no client slot");
         return;
     }
 
-    // The session lives on this stack frame for exactly one dispatch: the first chunk
-    // opens it, and its FLAG_FINAL tells the Session whether a body follows (further
+    // The channel lives on this stack frame for exactly one dispatch: the first chunk
+    // opens it, and its FLAG_FINAL tells the Channel whether a body follows (further
     // chunks pulled by read()) or the request ends here. Runs synchronously on the
     // httpd task.
     //
     // The gate decides what may run before this connection has authenticated, and
     // lends its auth state to the `auth` handlers. No handshake parsing here any more
     // — the handshake is three ordinary commands.
-    WsSessionLink link(req, sendMutex_);
+    WsTransport link(req, sendMutex_);
     AuthGate gate(*conn, *auth_);
 
-    Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-              sessionInbound_, sizeof(sessionInbound_));
-    s.feedRequest(payload, plen, (flags & session::FLAG_FINAL) != 0);
-    protocol::RunCommandSession(s, *commandManager_, gate);
+    Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
+              channelInbound_, sizeof(channelInbound_));
+    s.feedRequest(payload, plen, (flags & channel::FLAG_FINAL) != 0);
+    protocol::RunCommandChannel(s, *commandManager_, gate);
 }

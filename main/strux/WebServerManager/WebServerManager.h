@@ -25,7 +25,6 @@ public:
     void Init();
 
     void Broadcast(const char* json, int len);
-    void BroadcastBinary(const uint8_t* data, size_t len);
 
     /// The credential authority, shared with any other transport that carries the
     /// auth handshake (the relay pipe). Owned here because HTTP/WS auth started
@@ -74,7 +73,7 @@ private:
     /// knows whether to prompt.
     RequestError Cmd_AuthHello(CommandContext& ctx);
 
-    /// Password in, session key out. The key lets a reconnect resume without
+    /// Password in, channel key out. The key lets a reconnect resume without
     /// re-prompting.
     RequestError Cmd_AuthLogin(CommandContext& ctx);
 
@@ -92,9 +91,9 @@ private:
           "answered. With no web password set - the default - it never does." },
         { "auth", "login",  &InvokeCommand<&WebServerManager::Cmd_AuthLogin>,
           "Authenticate this connection with the device's web password. On success "
-          "the reply carries a session key that 'auth resume' takes." },
+          "the reply carries a channel key that 'auth resume' takes." },
         { "auth", "resume", &InvokeCommand<&WebServerManager::Cmd_AuthResume>,
-          "Re-authenticate a reconnected client with the session key a previous "
+          "Re-authenticate a reconnected client with the channel key a previous "
           "'auth login' handed out, instead of the password again." },
     };
 };

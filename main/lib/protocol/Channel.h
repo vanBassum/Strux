@@ -1,18 +1,18 @@
 #pragma once
 
 #include "Stream.h"
-#include "SessionLink.h"
-#include "SessionProtocol.h"
+#include "Transport.h"
+#include "ChannelProtocol.h"
 #include "esp_log.h"
 #include <cstdint>
 #include <cstddef>
 #include <algorithm>
 #include <cstring>
 
-// A session's stream, and the only thing that crosses the transport/dispatch
+// A channel's stream, and the only thing that crosses the transport/dispatch
 // boundary: a transport turns wire bytes into one of these, the dispatcher turns
 // it into a handler call. There is no layer in between — a transport constructs a
-// Session on its own stack, feeds it the first chunk, and hands it to
+// Channel on its own stack, feeds it the first chunk, and hands it to
 // CommandManager::Execute.
 //
 // read() = the request bytes; write() = the reply, accumulated and flushed as
@@ -21,7 +21,7 @@
 // task stack): payload goes after the 3-byte header slot, so a flush is one
 // SendRaw with no extra copy.
 //
-// The request is a run of session chunks that share this id: the first is fed
+// The request is a run of channel chunks that share this id: the first is fed
 // up front (feedRequest); once it's drained, read() pulls further chunks off
 // the link (RecvChunk) until a chunk carries FLAG_FINAL. A small no-body command
 // is a single FLAG_FINAL chunk, so read() never blocks; a streamed upload is many
@@ -29,10 +29,10 @@
 //
 // Both buffers are also lent out as-is (Stream::canLend and friends), which is what
 // lets a handler stream a firmware image to flash holding no buffer of its own.
-class Session : public Stream
+class Channel : public Stream
 {
     uint16_t id_;
-    SessionLink& link_;
+    Transport& link_;
 
     const uint8_t* req_ = nullptr;   // current chunk's payload
     size_t reqLen_ = 0;
@@ -51,8 +51,8 @@ class Session : public Stream
     // Frame [id|flags|payload] into buf_ and send it; reset the payload cursor.
     void emitChunk(uint8_t flags)
     {
-        session::writeHeader(buf_, id_, flags);
-        if (!link_.SendRaw(buf_, session::HEADER_LEN + outLen_)) failed_ = true;
+        channel::writeHeader(buf_, id_, flags);
+        if (!link_.SendRaw(buf_, channel::HEADER_LEN + outLen_)) failed_ = true;
         outLen_ = 0;
     }
 
@@ -72,22 +72,22 @@ class Session : public Stream
                 // stream: without a line here a transport failure is silent, and a
                 // reader that trusts 0 to mean "complete" acts on a truncated
                 // request.
-                ESP_LOGE("Session", "read failed after %u bytes: n=%d sid=%u (want %u)",
+                ESP_LOGE("Channel", "read failed after %u bytes: n=%d sid=%u (want %u)",
                          static_cast<unsigned>(consumed_), n,
                          static_cast<unsigned>(sid), static_cast<unsigned>(id_));
                 failed_ = true;
                 return false;
             }
-            req_ = inBuf_ + session::HEADER_LEN;
+            req_ = inBuf_ + channel::HEADER_LEN;
             reqLen_ = static_cast<size_t>(n);
             reqPos_ = 0;
-            reqFinal_ = (flags & session::FLAG_FINAL) != 0;
+            reqFinal_ = (flags & channel::FLAG_FINAL) != 0;
         }
         return true;
     }
 
 public:
-    Session(uint16_t id, SessionLink& link, uint8_t* buf, size_t payloadCap,
+    Channel(uint16_t id, Transport& link, uint8_t* buf, size_t payloadCap,
             uint8_t* inBuf, size_t inCap)
         : id_(id), link_(link), inBuf_(inBuf), inCap_(inCap), buf_(buf), cap_(payloadCap) {}
 
@@ -131,7 +131,7 @@ public:
         if (outLen_ == cap_) emitChunk(0);   // full buffer → send it, then lend it
         if (failed_) { avail = 0; return nullptr; }
         avail = cap_ - outLen_;
-        return buf_ + session::HEADER_LEN + outLen_;
+        return buf_ + channel::HEADER_LEN + outLen_;
     }
 
     void commitOutput(size_t n) override
@@ -148,7 +148,7 @@ public:
         while (remaining > 0)
         {
             size_t n = std::min(cap_ - outLen_, remaining);
-            memcpy(buf_ + session::HEADER_LEN + outLen_, p, n);
+            memcpy(buf_ + channel::HEADER_LEN + outLen_, p, n);
             outLen_ += n; p += n; remaining -= n;
             if (outLen_ == cap_) emitChunk(0);   // full buffer → non-final DATA chunk
         }
@@ -165,16 +165,16 @@ public:
     }
 
     // Emit the final chunk, closing the reply direction.
-    void finish() { emitChunk(session::FLAG_FINAL); }
+    void finish() { emitChunk(channel::FLAG_FINAL); }
 
     // Transport/framework refusal (unknown command, busy): one REJECT chunk
     // whose payload is the reason text.
     void reject(const char* reason)
     {
         size_t n = std::min(cap_, strlen(reason));
-        memcpy(buf_ + session::HEADER_LEN, reason, n);
+        memcpy(buf_ + channel::HEADER_LEN, reason, n);
         outLen_ = n;
-        emitChunk(session::FLAG_REJECT);
+        emitChunk(channel::FLAG_REJECT);
     }
 
     /// A read or write that stopped short because the transport broke, not because

@@ -38,7 +38,7 @@ void PartitionManager::Init()
 //
 // Neither is needed: the bytes are already in a buffer at both ends. An upload sits
 // in the transport's inbound buffer, a download is assembled in its framing buffer,
-// and Session lends both out (Stream::canLend), so these handlers move bytes between
+// and Channel lends both out (Stream::canLend), so these handlers move bytes between
 // flash and a buffer they do not own.
 
 const char* PartitionManager::GetRunningPartition() const
@@ -285,7 +285,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 
 // ──────────────────────────────────────────────────────────────
 // Chunked-upload steps — the two halves the one-shot path does implicitly, so a
-// sender can drive an upload as many short sessions instead of one long one.
+// sender can drive an upload as many short channels instead of one long one.
 // ──────────────────────────────────────────────────────────────
 
 // These two are the first handlers written against the console request format

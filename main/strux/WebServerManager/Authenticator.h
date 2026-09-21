@@ -1,11 +1,11 @@
 #pragma once
-#include "SessionTable.h"
+#include "ResumeTokens.h"
 #include "TypedSettings.h"
 #include "Mutex.h"
 #include <cstddef>
 
 // The credential authority: checks the configured password, owns the RAM
-// session-key table, and detects a password change. Transport-neutral; no
+// channel-key table, and detects a password change. Transport-neutral; no
 // connection state. Owned by WebServerManager (a plain class, not a
 // StruxProvider manager).
 //
@@ -24,16 +24,16 @@ public:
 
     bool AuthRequired();                 // password non-empty
     bool CheckPassword(const char* pw);  // epoch-check, then compare
-    void MintKey(char* out);             // SessionTable::Create (out >= SessionTable::TOKEN_LEN)
-    bool ValidateKey(const char* key);   // epoch-check, then SessionTable::Touch
-    void TouchKey(const char* key);      // SessionTable::Touch (refresh only)
+    void MintKey(char* out);             // ResumeTokens::Create (out >= ResumeTokens::TOKEN_LEN)
+    bool ValidateKey(const char* key);   // epoch-check, then ResumeTokens::Touch
+    void TouchKey(const char* key);      // ResumeTokens::Touch (refresh only)
 
 private:
     static constexpr const char* TAG = "Authenticator";
 
     StringSetting& password_;            // declared and registered by WebServerManager
-    SessionTable sessions_;
+    ResumeTokens tokens_;
     char passwordSnapshot_[64] = {};
     Mutex authMutex_;
-    void CheckPasswordEpoch();           // clears sessions_ when the password changed
+    void CheckPasswordEpoch();           // clears tokens_ when the password changed
 };

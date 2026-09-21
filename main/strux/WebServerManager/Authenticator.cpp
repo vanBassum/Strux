@@ -19,8 +19,8 @@ void Authenticator::CheckPasswordEpoch()
     password_.Get(current, sizeof(current));
     if (strcmp(current, passwordSnapshot_) != 0)
     {
-        ESP_LOGI(TAG, "password changed - clearing all sessions");
-        sessions_.Clear();
+        ESP_LOGI(TAG, "password changed - clearing all channels");
+        tokens_.Clear();
         strlcpy(passwordSnapshot_, current, sizeof(passwordSnapshot_));
     }
 }
@@ -28,12 +28,12 @@ void Authenticator::CheckPasswordEpoch()
 bool Authenticator::ValidateKey(const char* key)
 {
     CheckPasswordEpoch();
-    return sessions_.Touch(key);
+    return tokens_.Touch(key);
 }
 
 void Authenticator::TouchKey(const char* key)
 {
-    sessions_.Touch(key);
+    tokens_.Touch(key);
 }
 
 bool Authenticator::AuthRequired()
@@ -53,5 +53,5 @@ bool Authenticator::CheckPassword(const char* pw)
 
 void Authenticator::MintKey(char* out)
 {
-    sessions_.Create(out);
+    tokens_.Create(out);
 }

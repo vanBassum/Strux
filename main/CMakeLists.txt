@@ -21,7 +21,7 @@ set(STRUX_SOURCES
     "strux/WebServerManager/StaticFileHandler.cpp"
     "strux/WebServerManager/WebSocketHandler.cpp"
     "strux/WebServerManager/ConnectionRegistry.cpp"
-    "strux/WebServerManager/SessionTable.cpp"
+    "strux/WebServerManager/ResumeTokens.cpp"
     "strux/RelayManager/RelayManager.cpp"
     "strux/RelayManager/RelaySocket.cpp"
     "strux/TelemetryManager/TelemetryManager.cpp"

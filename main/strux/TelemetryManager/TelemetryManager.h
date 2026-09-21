@@ -3,7 +3,7 @@
 #include "StruxProvider.h"
 #include "InitState.h"
 #include "TypedSettings.h"
-#include "SessionProtocol.h"
+#include "ChannelProtocol.h"
 #include "CommandEntry.h"
 #include "Task.h"
 
@@ -28,7 +28,7 @@
 //     p.Commit();
 //
 // There is NO buffering yet: a point taken while the relay is down is gone. That is a
-// deliberate first cut — see docs/backlog for what buffering has to decide first.
+// deliberate first cut; a bounded ring is what replaces it.
 class TelemetryManager
 {
     static constexpr const char* TAG = "TelemetryManager";
@@ -120,7 +120,7 @@ private:
     uint32_t dropped_ = 0;
 
     /// Appends `device=<id>` so every point says which board it came from without
-    /// each caller remembering to, then sends the line on the telemetry session.
+    /// each caller remembering to, then sends the line on the telemetry channel.
     void Send(const char* measurement, const char* tags, const char* fields);
 
     void TaskLoop();

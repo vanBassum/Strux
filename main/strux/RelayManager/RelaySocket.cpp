@@ -88,7 +88,7 @@ RelaySocket::ConnectResult RelaySocket::Connect(const char* uri, int timeoutMs,
     // has to own this string.
     cfg.headers = extraHeaders;
     // False = the transport answers pings and completes closes itself, inside
-    // whatever read is in progress. Those frames never reach the session layer,
+    // whatever read is in progress. Those frames never reach the channel layer,
     // which is the only reason this class stays as short as it is.
     cfg.propagate_control_frames = false;
     if (esp_transport_ws_set_config(ws_, &cfg) != ESP_OK)
@@ -174,7 +174,7 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
         if (left <= 0)
         {
             // Half a message that stopped arriving is a broken pipe, not an idle
-            // one — the rest is never coming and the session cannot be completed.
+            // one — the rest is never coming and the channel cannot be completed.
             if (total > 0)
             {
                 ESP_LOGW(TAG, "message stalled after %u bytes", static_cast<unsigned>(total));
@@ -222,7 +222,7 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
         frameGot = 0;
 
         // The pipe carries binary only, same as the browser socket. Anything else
-        // is discarded whole rather than handed up as a session chunk.
+        // is discarded whole rather than handed up as a channel chunk.
         if (op != WS_TRANSPORT_OPCODES_BINARY && op != WS_TRANSPORT_OPCODES_CONT)
         {
             // Nothing is half-arrived any more, so go back to waiting for a message to

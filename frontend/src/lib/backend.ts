@@ -7,7 +7,6 @@ const TOKEN_KEY = "device.token"
 // ── Types ────────────────────────────────────────────────────────
 
 type BroadcastHandler = (msg: Record<string, unknown>) => void
-type BinaryHandler = (data: ArrayBuffer) => void
 
 interface PendingRequest {
   resolve: (data: unknown) => void
@@ -73,7 +72,6 @@ class BackendService {
   private ws: WebSocket | null = null
   private pending = new Map<number, PendingRequest>()
   private broadcastHandlers = new Set<BroadcastHandler>()
-  private binaryHandlers = new Set<BinaryHandler>()
   private statusHandlers = new Set<StatusHandler>()
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -369,12 +367,11 @@ class BackendService {
       return
     }
 
+    // No matching request: a reply to something that already timed out, or a
+    // chunk for a session this client never opened. Dropping it is the whole
+    // handling — there is nobody left to give it to.
     const req = this.pending.get(session)
-    if (!req) {
-      // No matching request — hand to legacy binary subscribers (unused here).
-      this.binaryHandlers.forEach((fn) => fn(data))
-      return
-    }
+    if (!req) return
     if (flags & FLAG_REJECT) {
       this.pending.delete(session)
       clearTimeout(req.timer)
@@ -454,14 +451,6 @@ class BackendService {
     this.ensureConnected().catch(() => {})
     return () => {
       this.broadcastHandlers.delete(fn)
-    }
-  }
-
-  subscribeBinary(fn: BinaryHandler): () => void {
-    this.binaryHandlers.add(fn)
-    this.ensureConnected().catch(() => {})
-    return () => {
-      this.binaryHandlers.delete(fn)
     }
   }
 

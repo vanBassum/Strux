@@ -52,7 +52,7 @@ public:
     /// `extraHeaders` is raw `Key: Value\r\n` lines added to the upgrade request, or
     /// nullptr. It is NOT copied — the caller keeps it alive, because a reconnect
     /// re-sends it. This is how the relay presents its token: a header goes up with
-    /// the handshake, so the server can refuse the upgrade outright and the session
+    /// the handshake, so the server can refuse the upgrade outright and the channel
     /// protocol above learns nothing about authentication.
     ConnectResult Connect(const char* uri, int timeoutMs, const char* extraHeaders = nullptr);
     void Close();
@@ -75,7 +75,7 @@ public:
     /// notice a pipe that died halfway through a chunk.
     int ReadFrame(uint8_t* buf, size_t cap, int timeoutMs);
 
-    /// One binary frame. Safe from any task: a session's reply and a log broadcast
+    /// One binary frame. Safe from any task: a channel's reply and a log broadcast
     /// come from different ones, and a frame must not be split down the middle.
     bool SendBinary(const uint8_t* data, size_t len, int timeoutMs);
 

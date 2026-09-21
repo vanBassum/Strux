@@ -3,20 +3,20 @@
 #include <cstdint>
 #include <cstddef>
 
-// The transport seam under Session: turn an already-framed session chunk into wire
+// The transport seam under Channel: turn an already-framed channel chunk into wire
 // bytes, and pull inbound wire bytes back as chunks. This is the ONLY
-// per-transport code — Session and every command handler are written against this
+// per-transport code — Channel and every command handler are written against this
 // interface and are identical across transports.
 //
-// This header, SessionProtocol.h, Session.h and CommandEnvelope.h are the whole of
+// This header, ChannelProtocol.h, Channel.h and CommandEnvelope.h are the whole of
 // the protocol layer, depending on nothing but Stream and the JSON helpers. They
 // live in lib/ rather than under a transport because the transports depend on them,
 // not the reverse.
 //
 // Implementations, each owned by the manager that owns its transport:
-//   WsSessionLink    — the local browser socket. One chunk = one WS binary frame;
+//   WsTransport    — the local browser socket. One chunk = one WS binary frame;
 //                      inbound frames are read synchronously on the httpd task.
-//   RelaySessionLink — the outbound socket to the relay server. Also a synchronous
+//   RelayTransport — the outbound socket to the relay server. Also a synchronous
 //                      read, on the task that runs the command. See
 //                      docs/reasoning/2026-08-05-13h55-owning-the-read-removes-the-buffer.md.
 //
@@ -26,17 +26,17 @@
 // dropped chunks when the queue filled. RecvChunk being an actual read on the
 // calling task is what a streaming handler needs, and now both have it.
 //
-// SendRaw takes a WHOLE pre-framed chunk rather than (session, flags, payload):
-// Session assembles the 3-byte header and the payload into one external buffer,
-// so a flush is a single send with no extra copy. A (session, flags, payload)
+// SendRaw takes a WHOLE pre-framed chunk rather than (channel, flags, payload):
+// Channel assembles the 3-byte header and the payload into one external buffer,
+// so a flush is a single send with no extra copy. A (channel, flags, payload)
 // signature would reintroduce that copy on every chunk — including every chunk
 // of a multi-MB firmware image.
-class SessionLink
+class Transport
 {
 public:
-    virtual ~SessionLink() = default;
+    virtual ~Transport() = default;
 
-    // `frame` is [session|flags|payload]; `len` is the total (header + payload).
+    // `frame` is [channel|flags|payload]; `len` is the total (header + payload).
     virtual bool SendRaw(const uint8_t* frame, size_t len) = 0;
 
     // Receive the next inbound chunk into `buf` (capacity `cap`), blocking until

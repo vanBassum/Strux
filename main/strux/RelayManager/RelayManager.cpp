@@ -224,9 +224,9 @@ void RelayManager::SendHello()
 
     // Built in the outbound framing buffer rather than on the stack: this task's
     // stack is sized for the heaviest command handler and must not also carry this.
-    // Safe to borrow — a hello goes out before any session exists on this pipe.
-    char* body = reinterpret_cast<char*>(sessionFrame_ + session::HEADER_LEN);
-    const size_t cap = sizeof(sessionFrame_) - session::HEADER_LEN;
+    // Safe to borrow — a hello goes out before any channel exists on this pipe.
+    char* body = reinterpret_cast<char*>(channelFrame_ + channel::HEADER_LEN);
+    const size_t cap = sizeof(channelFrame_) - channel::HEADER_LEN;
 
     // ── Everything this device tells the relay about itself ──────────────────
     //
@@ -275,7 +275,7 @@ void RelayManager::SendHello()
     };
 
     // `type` is for whoever reads a packet capture; the relay drops it, because the
-    // SESSION id is what actually names this chunk.
+    // CHANNEL id is what actually names this chunk.
     snprintf(body, cap, "{\"type\":\"relay hello\"");
 
     // cap - 1 throughout: the closing brace below is reserved, so a pair can never
@@ -296,13 +296,13 @@ void RelayManager::SendHello()
     strlcat(body, "}", cap);
 
     const size_t len = strlen(body);
-    session::writeHeader(sessionFrame_, session::HELLO_SESSION, session::FLAG_FINAL);
+    channel::writeHeader(channelFrame_, channel::HELLO_CHANNEL, channel::FLAG_FINAL);
 
     // Best effort, and deliberately not retried: nothing is waiting on it, and a pipe
     // that cannot carry 200 bytes is about to fail on its own and reconnect — which
     // sends the hello again. The cost of a lost one is a device list missing a name
     // until then.
-    if (!socket_.SendBinary(sessionFrame_, session::HEADER_LEN + len, HELLO_SEND_TIMEOUT_MS))
+    if (!socket_.SendBinary(channelFrame_, channel::HEADER_LEN + len, HELLO_SEND_TIMEOUT_MS))
         ESP_LOGW(TAG, "could not send hello");
 }
 
@@ -366,12 +366,12 @@ void RelayManager::TaskLoop()
 
         // Between requests this is where the task sits — blocked until a frame arrives
         // or the next keepalive comes due, whichever happens first. Mid-request the
-        // same read happens under the session, one layer down (RelaySessionLink) —
+        // same read happens under the channel, one layer down (RelayTransport) —
         // same socket, same task, which is the property that removed the queue.
         int32_t untilPing = static_cast<int32_t>(nextPingAt - NowMs());
         if (untilPing < 0) untilPing = 0;
 
-        const int n = socket_.ReadFrame(sessionInbound_, sizeof(sessionInbound_),
+        const int n = socket_.ReadFrame(channelInbound_, sizeof(channelInbound_),
                                         untilPing);
         if (n < 0)
         {
@@ -393,9 +393,9 @@ void RelayManager::TaskLoop()
             continue;
         }
 
-        HandleFrame(sessionInbound_, static_cast<size_t>(n));
+        HandleFrame(channelInbound_, static_cast<size_t>(n));
 
-        // After the request rather than before it: a session that took a while has
+        // After the request rather than before it: a channel that took a while has
         // just proven the pipe alive, and the next keepalive is owed from here.
         nextPingAt = NowMs() + PING_INTERVAL_MS;
     }
@@ -403,7 +403,7 @@ void RelayManager::TaskLoop()
 
 void RelayManager::OnConnected()
 {
-    // A reconnect is a fresh pipe: drop the old session state.
+    // A reconnect is a fresh pipe: drop the old channel state.
     conn_.reset();
     conn_.fd = -1;   // "slot in use" — there is no socket fd on this transport
 
@@ -484,17 +484,17 @@ void RelayManager::OnDisconnected()
 
 void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
 {
-    if (len < session::HEADER_LEN) return;
+    if (len < channel::HEADER_LEN) return;
 
-    uint16_t sid   = session::readU16(frame);
+    uint16_t sid   = channel::readU16(frame);
     uint8_t  flags = frame[2];
-    const uint8_t* payload = frame + session::HEADER_LEN;
-    size_t plen = len - session::HEADER_LEN;
-    const bool final = (flags & session::FLAG_FINAL) != 0;
+    const uint8_t* payload = frame + channel::HEADER_LEN;
+    size_t plen = len - channel::HEADER_LEN;
+    const bool final = (flags & channel::FLAG_FINAL) != 0;
 
     // Residue: the tail of a request whose handler already returned. Read as a fresh
     // chunk it would be taken for a request header, and a command invented out of
-    // firmware bytes. Skipped by id, so an unrelated session is never caught in it.
+    // firmware bytes. Skipped by id, so an unrelated channel is never caught in it.
     if (skipping_)
     {
         if (sid == skipSid_)
@@ -502,24 +502,24 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
             if (final)
             {
                 skipping_ = false;
-                ESP_LOGW(TAG, "session %u: skipped to the end of an abandoned body",
+                ESP_LOGW(TAG, "channel %u: skipped to the end of an abandoned body",
                          static_cast<unsigned>(sid));
             }
             return;
         }
-        skipping_ = false;   // a different session: whatever was left is behind us
+        skipping_ = false;   // a different channel: whatever was left is behind us
     }
 
     // Identical to the local transport's frame path (WebSocketHandler::HandleBinary),
-    // because everything above SessionLink is shared: the gate says what may run yet,
-    // the chunk becomes a Session, and CommandManager runs the command.
-    RelaySessionLink link(socket_);
+    // because everything above Transport is shared: the gate says what may run yet,
+    // the chunk becomes a Channel, and CommandManager runs the command.
+    RelayTransport link(socket_);
     AuthGate gate(conn_, *auth_);
 
-    Session s(sid, link, sessionFrame_, SESSION_WINDOW,
-              sessionInbound_, sizeof(sessionInbound_));
+    Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
+              channelInbound_, sizeof(channelInbound_));
     s.feedRequest(payload, plen, final);
-    protocol::RunCommandSession(s, strux_.getCommandManager(), gate);
+    protocol::RunCommandChannel(s, strux_.getCommandManager(), gate);
 
     // Returned without reaching FINAL — a refusal, or a handler that read less than
     // was sent. The rest is still coming down the socket.
@@ -558,20 +558,20 @@ void RelayManager::BroadcastLog(const char* json, int len)
 {
     if (!linkUp_) return;
 
-    // Same session-0 chunk the local socket broadcasts. This runs on the console
-    // task, so it can collide with a session's reply on the relay task —
+    // Same channel-0 chunk the local socket broadcasts. This runs on the console
+    // task, so it can collide with a channel's reply on the relay task —
     // RelaySocket's send lock is what keeps a frame from being split in half.
-    uint8_t buf[session::HEADER_LEN + 256];
-    int cap = static_cast<int>(sizeof(buf) - session::HEADER_LEN);
+    uint8_t buf[channel::HEADER_LEN + 256];
+    int cap = static_cast<int>(sizeof(buf) - channel::HEADER_LEN);
     if (len > cap) len = cap;
     if (len < 0) return;
 
-    session::writeHeader(buf, session::BROADCAST_SESSION, session::FLAG_FINAL);
-    memcpy(buf + session::HEADER_LEN, json, static_cast<size_t>(len));
+    channel::writeHeader(buf, channel::BROADCAST_CHANNEL, channel::FLAG_FINAL);
+    memcpy(buf + channel::HEADER_LEN, json, static_cast<size_t>(len));
 
     // Short timeout and no logging on failure — this runs on the console
     // broadcast task, and a log line here would feed itself.
-    socket_.SendBinary(buf, session::HEADER_LEN + static_cast<size_t>(len),
+    socket_.SendBinary(buf, channel::HEADER_LEN + static_cast<size_t>(len),
                        BROADCAST_TIMEOUT_MS);
 }
 
@@ -582,18 +582,18 @@ bool RelayManager::BroadcastTelemetry(const char* line, int len)
 
     // Sized for one line, which TelemetryManager already bounded. A point that does
     // not fit here would be a formatting bug there, so it is refused rather than cut.
-    uint8_t buf[session::HEADER_LEN + 384];
-    if (static_cast<size_t>(len) > sizeof(buf) - session::HEADER_LEN)
+    uint8_t buf[channel::HEADER_LEN + 384];
+    if (static_cast<size_t>(len) > sizeof(buf) - channel::HEADER_LEN)
     {
         ESP_LOGW(TAG, "telemetry line too long (%d) - dropped", len);
         return false;
     }
 
-    session::writeHeader(buf, session::TELEMETRY_SESSION, session::FLAG_FINAL);
-    memcpy(buf + session::HEADER_LEN, line, static_cast<size_t>(len));
+    channel::writeHeader(buf, channel::TELEMETRY_CHANNEL, channel::FLAG_FINAL);
+    memcpy(buf + channel::HEADER_LEN, line, static_cast<size_t>(len));
 
     // Same send lock as everything else on this socket: this is called from whichever
     // task took the measurement, which is not the relay task.
-    return socket_.SendBinary(buf, session::HEADER_LEN + static_cast<size_t>(len),
+    return socket_.SendBinary(buf, channel::HEADER_LEN + static_cast<size_t>(len),
                               BROADCAST_TIMEOUT_MS);
 }

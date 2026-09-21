@@ -1,13 +1,13 @@
-#include "SessionTable.h"
+#include "ResumeTokens.h"
 #include "ContextLock.h"
 #include <esp_random.h>
 #include <esp_timer.h>
 #include <cstring>
 #include <cstdio>
 
-static constexpr const char* TAG = "SessionTable";
+static constexpr const char* TAG = "ResumeTokens";
 
-void SessionTable::Create(char* tokenOut)
+void ResumeTokens::Create(char* tokenOut)
 {
     uint32_t r[4] = { esp_random(), esp_random(), esp_random(), esp_random() };
     snprintf(tokenOut, TOKEN_LEN, "%08lx%08lx%08lx%08lx",
@@ -17,7 +17,7 @@ void SessionTable::Create(char* tokenOut)
     int64_t now = esp_timer_get_time();
 
     LOCK(mutex_);
-    Session* slot = nullptr;
+    Channel* slot = nullptr;
     for (auto& s : sessions_)   // prefer an empty or expired slot
     {
         if (s.token[0] == 0 || now - s.lastActivity > IDLE_TIMEOUT_US)
@@ -36,7 +36,7 @@ void SessionTable::Create(char* tokenOut)
     slot->lastActivity = now;
 }
 
-bool SessionTable::Touch(const char* token)
+bool ResumeTokens::Touch(const char* token)
 {
     if (!token || token[0] == 0) return false;
     int64_t now = esp_timer_get_time();
@@ -56,7 +56,7 @@ bool SessionTable::Touch(const char* token)
     return false;
 }
 
-void SessionTable::Clear()
+void ResumeTokens::Clear()
 {
     LOCK(mutex_);
     for (auto& s : sessions_)

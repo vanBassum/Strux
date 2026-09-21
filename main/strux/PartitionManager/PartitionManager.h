@@ -28,7 +28,7 @@ private:
     // One mechanism for ANY partition, addressed by label — see PartitionWriter.
     // An upload is one streamed command (writePartition): the handler drains its
     // input stream straight into a PartitionWriter, finalize runs at end-of-stream.
-    // There is no cross-request session state; the transport carries the whole
+    // There is no cross-request channel state; the transport carries the whole
     // image within one command.
 
     const char* GetRunningPartition() const;
@@ -86,7 +86,7 @@ private:
           "running, is the next OTA slot, or may be written to." },
         { "partition", "write",    &InvokeCommand<&PartitionManager::Cmd_WritePartition>,
           "Write an image to a partition. The bytes follow the request envelope in "
-          "the same session, so this is a streaming upload rather than an argument. "
+          "the same channel, so this is a streaming upload rather than an argument. "
           "Destructive: it overwrites what the device boots or serves." },
         { "partition", "clear",    &InvokeCommand<&PartitionManager::Cmd_ClearPartition>,
           "Erase a partition. Destructive and immediate - the running app slot is "
@@ -99,7 +99,7 @@ private:
           "does not validate is refused." },
         { "partition", "read",     &InvokeCommand<&PartitionManager::Cmd_DownloadPartition>,
           "Read a partition back. The reply is the raw partition bytes and nothing "
-          "else - no header record - streamed until the session closes, which can "
+          "else - no header record - streamed until the channel closes, which can "
           "be megabytes. The size is what 'partition list' reports." },
     };
 };

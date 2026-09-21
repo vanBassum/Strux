@@ -148,7 +148,7 @@ class ConnectionAuth
 public:
     virtual ~ConnectionAuth() = default;
 
-    /// Mark this connection authenticated, remembering the session key so a
+    /// Mark this connection authenticated, remembering the resume key so a
     /// reconnect can resume.
     virtual void authenticate(const char* key) = 0;
 

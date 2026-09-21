@@ -1,19 +1,19 @@
 #pragma once
 
-#include "Session.h"
+#include "Channel.h"
 #include "CommandContext.h"
 #include "JsonHelpers.h"
 
 #include <algorithm>
 #include <cstring>
 
-// The request envelope, and the sequence that runs one session against a
+// The request envelope, and the sequence that runs one channel against a
 // dispatcher. This is protocol, not dispatch: knowing where the envelope ends and
 // what the command is called is the wire format's business, and the dispatcher
-// stays name-based so it never sees a Session.
+// stays name-based so it never sees a Channel.
 //
 // A request starts with a single '\n'-terminated line of JSON; the body — if any —
-// is whatever bytes follow it in the same session:
+// is whatever bytes follow it in the same channel:
 //
 //     {"type":"updateWrite","partition":"ota_1"}\n<firmware bytes…>
 //
@@ -36,7 +36,7 @@ namespace protocol
     /// Either way the route is two words, which is why the second branch exists at all:
     /// it is the seam a single-pass format would slot into. That format is parked, not
     /// planned — see docs/reasoning/ — so today every real request takes the JSON path.
-    inline void ReadCommandRoute(const Session& session,
+    inline void ReadCommandRoute(const Channel& channel,
                                  char* category, size_t catCap,
                                  char* command, size_t cmdCap)
     {
@@ -45,7 +45,7 @@ namespace protocol
 
         const uint8_t* head = nullptr;
         size_t headLen = 0;
-        session.peekRequest(head, headLen);
+        channel.peekRequest(head, headLen);
         if (headLen == 0) return;
 
         char route[MAX_COMMAND_NAME * 2];
@@ -85,7 +85,7 @@ namespace protocol
         command[cmdLen] = '\0';
     }
 
-    /// Run one opened session: name it, dispatch it, close or refuse the reply.
+    /// Run one opened channel: name it, dispatch it, close or refuse the reply.
     ///
     /// `dispatcher` is duck-typed on
     /// `RequestError Execute(category, command, Stream&, Stream&, const char**)`
@@ -96,11 +96,11 @@ namespace protocol
     /// connection has authenticated, and lends the auth state to the handlers that
     /// need it. Checked AFTER routing, because the decision is per-category.
     template <class Dispatcher, class Gate>
-    void RunCommandSession(Session& session, Dispatcher& dispatcher, Gate& gate)
+    void RunCommandChannel(Channel& channel, Dispatcher& dispatcher, Gate& gate)
     {
         char category[MAX_COMMAND_NAME] = {};
         char command[MAX_COMMAND_NAME]  = {};
-        ReadCommandRoute(session, category, sizeof(category), command, sizeof(command));
+        ReadCommandRoute(channel, category, sizeof(category), command, sizeof(command));
 
         if (category[0] == '\0' || command[0] == '\0')
         {
@@ -111,40 +111,40 @@ namespace protocol
             // afternoon once.
             const uint8_t* head = nullptr;
             size_t headLen = 0;
-            session.peekRequest(head, headLen);
+            channel.peekRequest(head, headLen);
             const bool json = headLen > 0 && head[0] == '{';
             const bool terminated =
                 memchr(head, '\n', std::min(headLen, MAX_ENVELOPE)) != nullptr;
 
             if (json && !terminated)
-                session.reject("envelope too long: it must be one line under "
+                channel.reject("envelope too long: it must be one line under "
                                "512 bytes, and the body goes AFTER the newline");
             else
-                session.reject("expected: <category> <command>");
+                channel.reject("expected: <category> <command>");
             return;
         }
 
         if (!gate.Allows(category))
         {
-            session.reject("unauthorized");
+            channel.reject("unauthorized");
             return;
         }
 
         // in == out: the handler reads its arguments and any body from the same
-        // session it writes its reply to.
+        // channel it writes its reply to.
         const char* failedArg = nullptr;
         const RequestError err =
-            dispatcher.Execute(category, command, session, session, &gate, &failedArg);
+            dispatcher.Execute(category, command, channel, channel, &gate, &failedArg);
         if (err != RequestError::Ok)
         {
-            // Form failures refuse the request. REJECT ends the session like FINAL
+            // Form failures refuse the request. REJECT ends the channel like FINAL
             // does, so this composes with anything the handler already wrote — a
             // refusal can always be last.
             char buf[96];
-            session.reject(DescribeRequestError(err, failedArg, buf, sizeof(buf)));
+            channel.reject(DescribeRequestError(err, failedArg, buf, sizeof(buf)));
             return;
         }
 
-        session.finish();   // FINAL — end of reply
+        channel.finish();   // FINAL — end of reply
     }
 }

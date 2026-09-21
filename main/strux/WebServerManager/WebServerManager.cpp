@@ -4,7 +4,7 @@
 #include "CommandManager.h"
 #include "RelayManager.h"
 #include "JsonHelpers.h"
-#include "SessionTable.h"
+#include "ResumeTokens.h"
 
 #include <unistd.h>
 #include <cstdio>
@@ -104,7 +104,7 @@ void WebServerManager::RegisterRoutes()
     // HTTP serves two things only: the WebSocket upgrade (which carries ALL
     // device interaction — commands, uploads, downloads, auth) and the static
     // app that bootstraps the page. No /api command route, no CORS: every
-    // device interaction is a session on the one socket.
+    // device interaction is a channel on the one socket.
     wsHandler_.RegisterRoute(server_);
     staticFileHandler_.RegisterRoute(server_);
 }
@@ -118,12 +118,6 @@ void WebServerManager::Broadcast(const char* json, int len)
     // second transport happens here: relayed frontends get the same live log
     // stream. No-op while the relay is disabled or disconnected.
     strux_.getRelayManager().BroadcastLog(json, len);
-}
-
-void WebServerManager::BroadcastBinary(const uint8_t* data, size_t len)
-{
-    if (server_)
-        wsHandler_.BroadcastBinary(server_, data, len);
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -168,8 +162,8 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
     }
     ctx.out.write("\n", 1);
 
-    // One write of the whole file, straight from flash-mapped rodata: Session::write
-    // splits it across the session window itself, so a 200 KB bundle still needs no
+    // One write of the whole file, straight from flash-mapped rodata: Channel::write
+    // splits it across the channel window itself, so a 200 KB bundle still needs no
     // 200 KB buffer here or on the transport — and no read buffer at all now that
     // there is no file to read.
     ctx.out.write(file.data, file.size);
@@ -214,7 +208,7 @@ RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
         return RequestError::Ok;
     }
 
-    char key[SessionTable::TOKEN_LEN] = {};
+    char key[ResumeTokens::TOKEN_LEN] = {};
     auth_.MintKey(key);
     if (ctx.connection) ctx.connection->authenticate(key);
 
@@ -225,9 +219,9 @@ RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
 
 RequestError WebServerManager::Cmd_AuthResume(CommandContext& ctx)
 {
-    char key[SessionTable::TOKEN_LEN] = {};
+    char key[ResumeTokens::TOKEN_LEN] = {};
     RETURN_IF_ERROR(ctx.readArgs(Required("key", key,
-        "The session key a previous successful 'auth login' returned.")));
+        "The channel key a previous successful 'auth login' returned.")));
 
     auto resp = ctx.reply.object();
 

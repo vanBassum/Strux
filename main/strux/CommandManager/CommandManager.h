@@ -17,12 +17,12 @@ class Stream;
 // manager that owns its domain and is registered from that manager's
 // Init().
 //
-// Deliberately knows nothing about sessions, transports or the wire format: give
+// Deliberately knows nothing about channels, transports or the wire format: give
 // it a command name and two streams and it runs the handler. That is what keeps it
 // the one piece of the request path that can be reasoned about on its own.
 //
 // Naming a request from its envelope is the protocol layer's job — see
-// protocol::RunCommandSession, which every transport calls.
+// protocol::RunCommandChannel, which every transport calls.
 class CommandManager {
     static constexpr const char* TAG = "CommandManager";
 
