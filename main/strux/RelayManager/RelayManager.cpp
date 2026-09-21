@@ -3,8 +3,8 @@
 #include "NetworkManager.h"
 #include "ConsoleManager.h"
 #include "TelemetryManager.h"
-#include "WebServerManager.h"
 #include "CommandManager.h"
+#include "AuthManager.h"
 #include "AuthGate.h"
 #include "Authenticator.h"
 
@@ -43,7 +43,7 @@ void RelayManager::Init()
     strux_.getSettingsManager().Register(
         { &enabled_, &url_, &deviceId_setting_, &token_setting_ });
 
-    auth_ = &strux_.getWebServerManager().GetAuthenticator();
+    auth_ = &strux_.getAuthManager().GetAuthenticator();
 
     if (!enabled_.Get())
     {

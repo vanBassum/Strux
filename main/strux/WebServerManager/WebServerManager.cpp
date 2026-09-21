@@ -1,10 +1,9 @@
 #include "WebServerManager.h"
 #include "ReplyBody.h"
 #include "ConsoleManager.h"
-#include "SettingsManager.h"
 #include "CommandManager.h"
+#include "AuthManager.h"
 #include "JsonHelpers.h"
-#include "ResumeTokens.h"
 
 #include <unistd.h>
 #include <cstdio>
@@ -47,9 +46,9 @@ void WebServerManager::Init()
     wsHandler_.SetCommandManager(strux_.getCommandManager());
     wsHandler_.SetConsole(strux_.getConsoleManager());
 
-    strux_.getSettingsManager().Register({ &webPassword_ });
-    auth_.Init();   // snapshot the stored password (after registration)
-    wsHandler_.SetAuth(auth_);
+    // Borrowed, not owned: the credential authority is the DEVICE's, and this
+    // manager is one of two transports that put a gate in front of it.
+    wsHandler_.SetAuth(strux_.getAuthManager().GetAuthenticator());
 
     StartServer();
     RegisterRoutes();
@@ -170,71 +169,5 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
     // 200 KB buffer here or on the transport — and no read buffer at all now that
     // there is no file to read.
     ctx.out.write(file.data, file.size);
-    return RequestError::Ok;
-}
-
-// ──────────────────────────────────────────────────────────────
-// auth — the handshake as ordinary commands. Nothing here frames its own reply or
-// parses its own wire format any more; it is a handler like every other.
-// ──────────────────────────────────────────────────────────────
-
-RequestError WebServerManager::Cmd_AuthHello(CommandContext& ctx)
-{
-    RETURN_IF_ERROR(ctx.readArgs());
-
-    // Per CONNECTION, not per device. A transport whose peer is already proven
-    // has nothing left to ask for, while a browser socket on a password-protected
-    // device does — and both arrive here. Asking the Authenticator alone told a
-    // remote browser riding an authenticated relay pipe to log in with a password
-    // it has no way to know.
-    const bool alreadyAuthed = ctx.connection && ctx.connection->isAuthed();
-
-    auto resp = ctx.reply.object();
-    resp.field("authRequired", !alreadyAuthed && auth_.AuthRequired());
-    return RequestError::Ok;
-}
-
-RequestError WebServerManager::Cmd_AuthLogin(CommandContext& ctx)
-{
-    char password[64] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Optional("password", password,
-        "The device's web password (setting 'web.password'). Omit it only to test "
-        "whether an empty password is accepted.")));
-
-    auto resp = ctx.reply.object();
-
-    // A wrong password is MEANING, not form: the request was perfectly well made, the
-    // answer is no. So it is a reply, not a refusal.
-    if (!auth_.CheckPassword(password))
-    {
-        resp.field("ok", false);
-        return RequestError::Ok;
-    }
-
-    char key[ResumeTokens::TOKEN_LEN] = {};
-    auth_.MintKey(key);
-    if (ctx.connection) ctx.connection->authenticate(key);
-
-    resp.field("ok", true);
-    resp.field("key", key);
-    return RequestError::Ok;
-}
-
-RequestError WebServerManager::Cmd_AuthResume(CommandContext& ctx)
-{
-    char key[ResumeTokens::TOKEN_LEN] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("key", key,
-        "The channel key a previous successful 'auth login' returned.")));
-
-    auto resp = ctx.reply.object();
-
-    if (!auth_.ValidateKey(key))
-    {
-        resp.field("ok", false);
-        return RequestError::Ok;
-    }
-
-    if (ctx.connection) ctx.connection->authenticate(key);
-    resp.field("ok", true);
     return RequestError::Ok;
 }

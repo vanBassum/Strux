@@ -6,11 +6,11 @@
 
 // The credential authority: checks the configured password, owns the RAM
 // channel-key table, and detects a password change. Transport-neutral; no
-// connection state. Owned by WebServerManager (a plain class, not a
+// connection state. Owned by AuthManager (a plain class, not a
 // StruxProvider manager).
 //
 // It does not DECLARE the password setting — settings belong to the manager that
-// owns them, and this is not a manager. It holds a reference to WebServerManager's
+// owns them, and this is not a manager. It holds a reference to AuthManager's
 // setting and reads it live on every check: a copy taken at Init would make
 // change detection blind, since nothing notifies on a setting write.
 class Authenticator {
@@ -31,7 +31,7 @@ public:
 private:
     static constexpr const char* TAG = "Authenticator";
 
-    StringSetting& password_;            // declared and registered by WebServerManager
+    StringSetting& password_;            // declared and registered by AuthManager
     ResumeTokens tokens_;
     char passwordSnapshot_[64] = {};
     Mutex authMutex_;

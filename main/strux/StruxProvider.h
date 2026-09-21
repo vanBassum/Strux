@@ -16,6 +16,7 @@
 // acyclic. A StruxManager that wanted AppProvider& would be a design error, not a
 // missing accessor.
 
+class AuthManager;
 class CommandManager;
 class ConsoleManager;
 class NetworkManager;
@@ -30,6 +31,7 @@ class WebServerManager;
 class StruxProvider
 {
 public:
+    virtual AuthManager& getAuthManager() = 0;
     virtual CommandManager& getCommandManager() = 0;
     virtual ConsoleManager& getConsoleManager() = 0;
     virtual NetworkManager& getNetworkManager() = 0;

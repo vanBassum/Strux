@@ -8,8 +8,8 @@
 //
 // It used to parse hello/login/auth out of the first chunk and write its own framed
 // replies — a second command dispatcher living below the real one. Those verbs are now
-// ordinary commands in the `auth` category (WebServerManager owns them, because it owns
-// the Authenticator), so what remains here is a whitelist: before a connection has
+// ordinary commands in the `auth` category (AuthManager owns them, because it owns the
+// Authenticator), so what remains here is a whitelist: before a connection has
 // authenticated, only that one category dispatches.
 //
 // Which is what the name always claimed. It is a gate.
