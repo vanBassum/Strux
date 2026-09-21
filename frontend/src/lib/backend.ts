@@ -1018,6 +1018,10 @@ export interface WifiNetwork {
   rssi: number
   channel: number
   secure: boolean
+  /// The auth mode by name ("WPA2", "WPA2/WPA3", "open"). `secure` is the padlock;
+  /// this is the detail that tells a refusal from a distance. Optional because a
+  /// device on older firmware does not send it.
+  auth?: string
 }
 
 export interface WifiScanResponse {

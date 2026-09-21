@@ -478,6 +478,11 @@ RequestError NetworkManager::Cmd_WifiScan(CommandContext& ctx)
         n.field("rssi", static_cast<int32_t>(results[i].rssi));
         n.field("channel", static_cast<int32_t>(results[i].channel));
         n.field("secure", results[i].secure);
+        // "secure" is the padlock; "auth" is the answer to why a join was refused at
+        // full signal, which is the one question the bit cannot settle. A caller
+        // reaching this device over the relay cannot read the firmware log, so the
+        // name goes on the reply too.
+        n.field("auth", WiFiInterface::AuthModeName(results[i].authmode));
     }
     return RequestError::Ok;
 }
