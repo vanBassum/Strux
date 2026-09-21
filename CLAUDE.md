@@ -34,14 +34,37 @@ pnpm typecheck    # tsc -b --force (plain `tsc --noEmit` checks NOTHING:
 `pnpm dev` gives HMR for the whole UI — one bundle, one build, every page live — and
 proxies the WebSocket to the device named by `frontend/src/config.ts`'s `DEV_HOST`.
 
-There are no automated tests; verification is building, flashing, and driving the device over its own wire:
+Host tests (`test/`), for the pure headers under `main/lib/` — no ESP-IDF, no board:
+
+```bash
+cmake -S test -B build_test && cmake --build build_test
+ctest --test-dir build_test --output-on-failure
+```
+
+What belongs there is what **names no layer**, which today is the protocol's own state:
+`ChannelProtocol` (wire byte order, the id halves), `ChannelTable`, and `ConnectionState`'s
+handshake — the nonce comparison that decides which half a peer allocates from, which needs
+two colliding boards to provoke on hardware and a loop to provoke here. The harness is
+`test/check.h`, forty lines and no dependency, so CI needs nothing but a compiler.
+
+That boundary is deliberate and is not a gap: everything else needs a radio, a flash
+partition or a socket, and **stays verified by driving a real device over its own wire**.
+Do not grow this directory into a mock of the device.
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs those tests, the frontend
+typecheck and build, and a firmware build for both boards on every push and pull request.
+[release.yml](.github/workflows/release.yml) is the same firmware build plus the artifacts,
+and only fires on a `v*` tag — so the board matrix exists in both files and a new board
+belongs in each.
+
+Everything past `lib/` is verified on the device:
 
 1. `idf.py build`, `idf.py -p <PORT> flash` — find the port, don't trust a number in a doc.
 2. Open a WebSocket to `ws://<device>/ws`, or `ws://<relay>/devices/<deviceId>/ws` through the relay. **No login step** — auth is three ordinary commands (`auth hello|login|resume`) and is off entirely while `web.password` is empty, which is the default.
 3. **Handshake first, and nothing may be sent before it settles.** Both peers send one CONTROL frame unprompted — `[0 u16][FLAG_CONTROL 0x08][version u8][nonce u64 LE]` — and the higher nonce takes the low half of the channel-id space (`0x0000..0x7FFF`); the other takes the high half. Version is 1 and a mismatch closes the connection.
 4. Open a channel: `[channel u16 LE][flags u8][payload]`, payload starting with the envelope line `{"type":"<category> <command>", …args}\n`, body after it — same frame or further frames sharing the channel. `FLAG_OPEN` (0x04) on the first, `FLAG_FINAL` (0x01) on the last. A one-shot command is `OPEN|FINAL`.
 5. Read frames on your channel until one carries `FLAG_FINAL`, or `FLAG_RESET` (0x02, payload = reason) which ends the channel in both directions. Non-final frames are reply data, or progress on a long write. **The device opens channels at you too** — `log stream` and, on the relay pipe, `telemetry stream` — each naming itself in the envelope on its OPEN frame, so recognise a channel by its name and not by its number. Nothing is reserved; channel 0 is ordinary.
-6. Keep each payload inside the transport's inbound window (4096 on both) — a larger frame is refused, not split.
+6. Keep each payload inside the receiving link's inbound window (4096 on both transports today) — a larger chunk is refused, not split. That window is **that Connection's own property, not a wire constant**: nothing negotiates it and no two peers have to agree on it. Overshoot it and you lose that one channel to a `RESET` naming the reason, not the connection — through the relay the refusal comes from the relay, which has its own window and its own answer.
 
 A second `OPEN` while the device is serving one gets `RESET` with the reason `busy`: a Connection runs one operation at a time, deliberately, and that is policy rather than something the wire forbids. `RESET` is also how you cancel an upload without dropping the socket.
 
