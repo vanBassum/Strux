@@ -37,6 +37,13 @@ const navItems = [
 
 export type Page = (typeof navItems)[number]["page"]
 
+// The routable pages, derived from the nav rather than written out again.
+// use-route needs the same list to decide whether a hash segment is a real
+// page, and a second hand-maintained copy could not be type-checked: a
+// `Page[]` missing an entry is a shorter valid array, so a new page appeared
+// in the nav and silently routed back to home when clicked.
+export const PAGES: readonly Page[] = navItems.map((i) => i.page)
+
 interface AppSidebarProps {
   currentPage: Page
   onNavigate: (page: Page) => void
