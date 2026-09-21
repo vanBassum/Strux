@@ -30,9 +30,16 @@ class RelayTransport : public Transport
     static constexpr int RECV_TIMEOUT_MS = 10000;
 
     RelaySocket& socket_;
+    size_t inboundLimit_;
 
 public:
-    explicit RelayTransport(RelaySocket& socket) : socket_(socket) {}
+    // `inboundLimit` is the owner's receive buffer, reported back through
+    // Transport::InboundLimit for diagnostics. ReadFrame enforces the capacity it
+    // is handed, so this never becomes a second source of truth about the size.
+    explicit RelayTransport(RelaySocket& socket, size_t inboundLimit = 0)
+        : socket_(socket), inboundLimit_(inboundLimit) {}
+
+    size_t InboundLimit() const override { return inboundLimit_; }
 
     bool SendRaw(const uint8_t* frame, size_t len) override
     {
@@ -43,8 +50,15 @@ public:
     {
         // Idle, dead and too-short all end the request the same way: mid-request
         // there is no such thing as "nothing arrived, carry on".
+        //
+        // A message over this link's window is the one exception, and it is why
+        // ReadFrame has a return value of its own for it: the relay has framed
+        // more than fits, ReadFrame has already read it to the end and thrown it
+        // away, and the PIPE IS STILL GOOD. Failing it like a dead socket is what
+        // used to drop every channel on the connection over one bad chunk.
         const int n = socket_.ReadFrame(buf, cap, RECV_TIMEOUT_MS);
-        if (n < static_cast<int>(channel::HEADER_LEN)) return -1;
+        if (n == RelaySocket::READ_TOO_LONG) return RECV_TOO_LONG;
+        if (n < static_cast<int>(channel::HEADER_LEN)) return RECV_EOF;
 
         *sid   = channel::readU16(buf);
         *flags = buf[2];

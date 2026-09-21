@@ -261,7 +261,7 @@ void RelayManager::TaskLoop()
             // a reserved channel; it is an ordinary `system info` command now, which
             // the relay calls once the connection is READY.
             {
-                RelayTransport link(socket_);
+                RelayTransport link(socket_, INBOUND_WINDOW);
                 protocol::SendHandshake(conn_.conn, link);
             }
             // Right after connect, because on a wss:// pipe the TLS handshake just
@@ -286,6 +286,16 @@ void RelayManager::TaskLoop()
 
         const int n = socket_.ReadFrame(channelInbound_, sizeof(channelInbound_),
                                         untilPing);
+        if (n == RelaySocket::READ_TOO_LONG)
+        {
+            // The relay framed more than this link takes in one chunk. The message
+            // has been read to its end and discarded, so the pipe is still in sync
+            // -- and the channel id went with the bytes, so there is nothing to
+            // refuse by name. Saying so and carrying on beats dropping every other
+            // channel on the pipe, which is what this used to do.
+            ESP_LOGW(TAG, "oversized inbound chunk discarded - pipe kept");
+            continue;
+        }
         if (n < 0)
         {
             OnDisconnected();
@@ -417,7 +427,7 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
     // so the frames are dropped by lookup rather than by a mode flag, and the local
     // WebSocket -- which never had the workaround, and therefore had the bug -- gets
     // the same handling from the same code.
-    RelayTransport link(socket_);
+    RelayTransport link(socket_, INBOUND_WINDOW);
     AuthGate gate(conn_, *auth_);
 
     protocol::Connection<CommandManager, AuthGate> connection(
@@ -473,7 +483,7 @@ void RelayManager::OpenStreams()
 {
     if (!linkUp_ || conn_.conn.phase != ConnectionState::Phase::Ready) return;
 
-    RelayTransport link(socket_);
+    RelayTransport link(socket_, INBOUND_WINDOW);
 
     if (conn_.conn.logChannel < 0)
         protocol::OpenPassiveChannel(conn_.conn, link, protocol::LOG_STREAM_ENVELOPE,

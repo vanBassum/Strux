@@ -62,7 +62,7 @@ bool WebSocketHandler::AddWsClient(httpd_req_t* req, ConsoleManager& console)
     // the 101 by the time this handler runs, so the frame is legal here, and
     // sending rather than answering is what keeps the handshake symmetric: neither
     // peer leads, and the same code works on a transport with no dialer at all.
-    WsTransport link(req, sendMutex_);
+    WsTransport link(req, sendMutex_, INBOUND_WINDOW);
     protocol::SendHandshake(c->conn, link);
     return true;
 }
@@ -151,6 +151,56 @@ void WebSocketHandler::PumpLogs(httpd_handle_t server, ConsoleManager& console)
 // WebSocket frame handling
 // ──────────────────────────────────────────────────────────────
 
+// Take an over-long frame off the socket and refuse it on its own channel.
+//
+// The channel id is in the first three bytes, which are the first three bytes of
+// the payload we are about to throw away -- so the drain keeps the first gulp
+// long enough to read them, and the sender learns which request died and why.
+// A frame too short to even carry a header has no channel to refuse, so it is
+// simply discarded.
+//
+// Nothing here touches the client slot: an oversized frame is a fault in one
+// request, not a reason to drop a browser.
+void WebSocketHandler::RefuseOverlongFrame(httpd_req_t* req, size_t len, size_t cap)
+{
+    ESP_LOGW(TAG, "inbound frame %u > %u-byte window - refusing the channel, "
+             "keeping the socket", static_cast<unsigned>(len),
+             static_cast<unsigned>(cap));
+
+    size_t remaining = len;
+    bool   haveHeader = false;
+    uint16_t sid = 0;
+
+    while (remaining > 0)
+    {
+        httpd_ws_frame_t g = {};
+        g.len = remaining < cap ? remaining : cap;
+        g.payload = inboundFrame_;
+        // `len` already set, so this skips the header parse and reads exactly that
+        // many bytes. Every gulp after the first is unmasked from the wrong offset
+        // because IDF restarts the mask cursor per call and does not expose it --
+        // which is fine for bytes on their way to the bin, and is why the header is
+        // taken from the FIRST gulp only.
+        if (httpd_ws_recv_frame(req, &g, g.len) != ESP_OK)
+        {
+            ESP_LOGD(TAG, "drain failed - dropping the client");
+            RemoveWsClient(httpd_req_to_sockfd(req));
+            return;
+        }
+        if (!haveHeader && g.len >= channel::HEADER_LEN)
+        {
+            sid = channel::readU16(inboundFrame_);
+            haveHeader = true;
+        }
+        remaining -= g.len;
+    }
+
+    if (!haveHeader) return;
+
+    WsTransport link(req, sendMutex_, INBOUND_WINDOW);
+    protocol::SendReset(link, sid, "chunk over the inbound window");
+}
+
 esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
 {
     auto* self = static_cast<WebSocketHandler*>(req->user_ctx);
@@ -166,9 +216,17 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         return ESP_OK;
     }
 
-    httpd_ws_frame_t frame = {};
-    frame.payload = self->inboundFrame_;
-    esp_err_t ret = httpd_ws_recv_frame(req, &frame, sizeof(self->inboundFrame_) - 1);
+    // Two steps, not one, and the reason is the whole of issue #39. A single
+    // httpd_ws_recv_frame with a max_len refuses an over-long frame WITHOUT
+    // consuming its payload, so the next read takes body bytes for a frame header
+    // and the connection is finished -- which is how one oversized frame from one
+    // browser used to drop the socket with no reply and no reason. Reading the
+    // header first lets an over-long frame be drained and refused on its own
+    // channel, leaving every other channel on this socket alone.
+    const size_t cap = sizeof(self->inboundFrame_) - 1;
+
+    httpd_ws_frame_t frame = {};                   // len == 0 -> header-only read
+    esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK)
     {
         // Also DEBUG: the common cause is the peer vanishing, which is not this
@@ -176,6 +234,24 @@ esp_err_t WebSocketHandler::HandleWs(httpd_req_t* req)
         ESP_LOGD(TAG, "WS recv failed: %s", esp_err_to_name(ret));
         self->RemoveWsClient(httpd_req_to_sockfd(req));
         return ret;
+    }
+
+    if (frame.len > cap)
+    {
+        self->RefuseOverlongFrame(req, frame.len, cap);
+        return ESP_OK;
+    }
+
+    if (frame.len > 0)
+    {
+        frame.payload = self->inboundFrame_;
+        ret = httpd_ws_recv_frame(req, &frame, cap);
+        if (ret != ESP_OK)
+        {
+            ESP_LOGD(TAG, "WS payload recv failed: %s", esp_err_to_name(ret));
+            self->RemoveWsClient(httpd_req_to_sockfd(req));
+            return ret;
+        }
     }
 
     // Any inbound frame (heartbeat included) keeps the channel alive —
@@ -233,7 +309,7 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
         // timeout.
         ESP_LOGW(TAG, "frame on fd=%d with no client slot - refusing channel %u",
                  fd, (unsigned)sid);
-        WsTransport link(req, sendMutex_);
+        WsTransport link(req, sendMutex_, INBOUND_WINDOW);
         Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
                   channelInbound_, sizeof(channelInbound_));
         s.feedRequest(payload, plen, (flags & channel::FLAG_FINAL) != 0);
@@ -250,7 +326,7 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     // The gate decides what may run before this connection has authenticated, and
     // lends its auth state to the `auth` handlers. No handshake parsing here any more
     // — the handshake is three ordinary commands.
-    WsTransport link(req, sendMutex_);
+    WsTransport link(req, sendMutex_, INBOUND_WINDOW);
     AuthGate gate(*conn, *auth_);
 
     protocol::Connection<CommandManager, AuthGate> connection(

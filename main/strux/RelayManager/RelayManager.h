@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "StruxProvider.h"
 #include "InitState.h"
@@ -27,18 +27,26 @@ class RelayManager
 {
     static constexpr const char* TAG = "RelayManager";
 
-    // Reply window. Larger than the local socket's 512 because every chunk is a
-    // WAN round trip's worth of framing, and frontend bundles are the common
-    // payload. NOT payload-proportional — a file of any size streams window by
-    // window.
-    static constexpr size_t CHANNEL_WINDOW = 1024;
+    // Reply window. NOT payload-proportional - a file of any size streams window by
+    // window, because Channel splits at this boundary and the reader reassembles
+    // until FINAL.
+    //
+    // PURELY LOCAL, and this transport is free to pick differently from the browser
+    // socket: every chunk here is a WAN round trip's worth of framing and, over
+    // wss://, one TLS record with its own header, tag and send. Frontend bundles are
+    // the common payload, so the count is what costs. Bulk AES-GCM is not the
+    // expense on an ESP32 - doing it three hundred times with a syscall each is.
+    static constexpr size_t CHANNEL_WINDOW = 4096;
 
-    // Must match the largest chunk a client sends (the frontend sizes upload
-    // chunks to the local transport's 4096).
+    // THIS CONNECTION'S OWN LIMIT for one inbound chunk. It is not a shared
+    // constant and nothing at the other end has to equal it: a peer that frames
+    // more than this now loses that one channel, and the pipe and every other
+    // channel on it carry on. The relay keeps its own, smaller, send-side number
+    // for the same reason we keep this one - see strux-relay's DeviceChunkLimit.
     static constexpr size_t INBOUND_WINDOW = 4096;
 
     // This task reads the socket AND runs the command, so its stack has to cover the
-    // heaviest handler and, on a wss:// pipe, a TLS handshake — never at the same
+    // heaviest handler and, on a wss:// pipe, a TLS handshake â€” never at the same
     // time, so it is the larger of the two rather than the sum.
     static constexpr int TASK_STACK = 10240;
 
@@ -51,7 +59,7 @@ class RelayManager
 
 
     // Retry pacing, and two different kinds of waiting. An unreachable server is
-    // usually transient — WiFi, DNS, a restart — so the first retry is quick and then
+    // usually transient â€” WiFi, DNS, a restart â€” so the first retry is quick and then
     // doubles, because the tenth attempt is no more likely than the ninth and costs a
     // TLS handshake. A refused upgrade is not transient at all: it waits on a person
     // approving this device, so it retries slowly, which is still often enough to keep
@@ -66,7 +74,7 @@ class RelayManager
     // Nothing on an idle pipe means nothing to notice a dead TCP connection by, so we
     // make traffic: a ping that cannot be sent is the signal to reconnect. This is
     // both the keepalive interval and how long an idle read blocks, because they are
-    // the same question — the read returns exactly when the next ping comes due, so an
+    // the same question â€” the read returns exactly when the next ping comes due, so an
     // idle pipe wakes this task once per interval rather than thirty times. Expressing
     // it as a 1 s poll and a count of polls pinned the wake rate at 1 Hz for no reason
     // beyond arithmetic, and that rate is the ceiling on how long a fork enabling light
@@ -119,7 +127,7 @@ private:
     char token_[TOKEN_HEX_LEN + 1] = {};
 
     // The upgrade request's extra headers, built once in Init and pointed at by
-    // RelaySocket on every reconnect — so it must outlive Connect().
+    // RelaySocket on every reconnect â€” so it must outlive Connect().
     char headers_[96] = {};
 
     // Framing buffers, members rather than stack: this task's stack is sized for
@@ -128,8 +136,8 @@ private:
     // channelInbound_ is the ONLY inbound buffer. A frame is read straight into it
     // and the channel's first chunk is read out of it in place; further chunks of
     // the same request refill it, which is safe because a channel only ever refills
-    // once the current chunk is drained. It used to be one of three — a reassembly
-    // buffer, a heap copy per frame, and this — because a frame had to survive being
+    // once the current chunk is drained. It used to be one of three â€” a reassembly
+    // buffer, a heap copy per frame, and this â€” because a frame had to survive being
     // handed between two tasks. One task, one buffer.
     uint8_t channelFrame_[channel::HEADER_LEN + CHANNEL_WINDOW];
     uint8_t channelInbound_[channel::HEADER_LEN + INBOUND_WINDOW];
@@ -156,7 +164,7 @@ private:
 
     /// Log this task's stack headroom when it reaches a new low. Called after every
     /// command, because a command handler runs on this task and is the deepest thing
-    /// that ever will — as is, on a wss:// pipe, the TLS handshake.
+    /// that ever will â€” as is, on a wss:// pipe, the TLS handshake.
     void CheckStackHeadroom();
     size_t stackLow_ = SIZE_MAX;
 
@@ -164,7 +172,7 @@ private:
     void OnDisconnected();
 
     /// Report a failed connect attempt and return how long to wait before the next
-    /// one. Logs at most once per distinct reason — see the definition for why that
+    /// one. Logs at most once per distinct reason â€” see the definition for why that
     /// matters more here than the usual "log every failure" instinct.
     int ReportConnectFailure(RelaySocket::ConnectResult result);
 
@@ -175,17 +183,17 @@ private:
     uint32_t suppressedFailures_ = 0;
     int      reconnectDelayMs_   = RECONNECT_DELAY_MS;
 
-    // ── Settings (registered with SettingsManager in Init) ──
+    // â”€â”€ Settings (registered with SettingsManager in Init) â”€â”€
     inline static BoolSetting   enabled_  { "relay.enabled",  "Relay Enabled",   false };
     inline static StringSetting url_      { "relay.url",      "Relay Server URL", "" };
-    // Empty → derived from the WiFi MAC, so a fresh device registers without being
+    // Empty â†’ derived from the WiFi MAC, so a fresh device registers without being
     // told who it is. The MAC is the *technical* identity; what a human reads in the
     // relay's device list is device.name, which travels alongside it for display only.
     // Set this only to pin an id that should outlive the board it started on.
     inline static StringSetting deviceId_setting_{ "relay.deviceId", "Relay Device ID", "" };
 
-    // The device's proof that it is the id it claims. Empty → generated on first
+    // The device's proof that it is the id it claims. Empty â†’ generated on first
     // Init and stored, so the secret is created here and never travels except
-    // inside TLS. There is no server→device message that can set it.
+    // inside TLS. There is no serverâ†’device message that can set it.
     inline static StringSetting token_setting_{ "relay.token", "Relay Device Token", "" };
 };

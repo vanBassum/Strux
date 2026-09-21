@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <esp_http_server.h>
 #include "Mutex.h"
@@ -59,15 +59,29 @@ private:
     bool AddWsClient(httpd_req_t* req, ConsoleManager& console);
 
     // Channel reply flush window (off the httpd-task stack; reused, single
-    // channel at a time). NOT payload-proportional — a small batch buffer that
+    // channel at a time). NOT payload-proportional - a small batch buffer that
     // amortizes JsonWriter's tiny writes into WS frames; a reply of any size
     // streams out window-by-window. Layout: [ 3-byte chunk header | payload ].
-    static constexpr size_t CHANNEL_WINDOW = 512;
+    //
+    // PURELY LOCAL. Nothing needs to agree with it: Channel splits a reply at this
+    // boundary into non-final DATA chunks and any reader reassembles until FINAL,
+    // so this number is a cost-per-frame dial and nothing else. It is 4096 rather
+    // than 512 because every flush is one httpd_ws_send_frame with its own framing
+    // and its own TCP write behind it, and a 300 KB reply at 512 bytes spends most
+    // of its wall clock framing rather than moving data. A future UART or BLE link
+    // will pick its own number here and no peer will notice.
+    static constexpr size_t CHANNEL_WINDOW = 4096;
     uint8_t channelFrame_[channel::HEADER_LEN + CHANNEL_WINDOW];
 
     // Inbound window for streamed request bodies: read() pulls continuation
     // channel chunks into here, so each body chunk's payload may be up to
-    // INBOUND_WINDOW bytes (the frontend sizes upload chunks to match).
+    // INBOUND_WINDOW bytes.
+    //
+    // THIS CONNECTION'S OWN LIMIT, not a wire constant. It bounds what a peer may
+    // put in ONE chunk on THIS link; a peer that overshoots now loses its channel
+    // and nothing else, so nobody else's buffer has to equal this one. The
+    // frontend picks a chunk size under it by convention, not by contract --
+    // see backend.ts.
     static constexpr size_t INBOUND_WINDOW = 4096;
     uint8_t channelInbound_[channel::HEADER_LEN + INBOUND_WINDOW];
 
@@ -99,10 +113,14 @@ private:
 
     static esp_err_t HandleWs(httpd_req_t* req);
 
+    /// Drain a frame that does not fit INBOUND_WINDOW and RESET its channel. The
+    /// socket survives, because one over-long chunk is one channel's fault.
+    void RefuseOverlongFrame(httpd_req_t* req, size_t len, size_t cap);
+
     // Binary channel transport. A request is one binary chunk; the reply
     // streams back as chunks on the same channel id. The pre-auth handshake
     // verbs (hello/login/auth) and the authed/not routing decision are
     // delegated to AuthGate, constructed locally per frame (it only holds an
-    // Authenticator&, so this is cheap) — see AuthGate.h.
+    // Authenticator&, so this is cheap) â€” see AuthGate.h.
     void HandleBinary(httpd_req_t* req, const uint8_t* frame, size_t len);
 };

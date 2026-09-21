@@ -168,6 +168,13 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
     size_t total    = 0;   // bytes of this message assembled so far
     size_t frameGot = 0;   // bytes of the current frame
 
+    // Set the moment the message outgrows `buf`. From there the loop keeps reading
+    // exactly as it would otherwise -- over the top of the buffer, which is the
+    // point, because the bytes are going in the bin -- and stops at the same FIN.
+    // Reading it to the end is what keeps the pipe usable; returning early would
+    // leave the tail to be parsed as the next message.
+    bool overlong = false;
+
     for (;;)
     {
         const int32_t left = static_cast<int32_t>(deadline - NowMs());
@@ -175,7 +182,10 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
         {
             // Half a message that stopped arriving is a broken pipe, not an idle
             // one — the rest is never coming and the channel cannot be completed.
-            if (total > 0)
+            // `overlong` counts as half-arrived even though `total` has been wound
+            // back to zero: the bytes are being discarded, but the message is still
+            // in progress and returning 0 here would resume mid-message next time.
+            if (total > 0 || overlong)
             {
                 ESP_LOGW(TAG, "message stalled after %u bytes", static_cast<unsigned>(total));
                 return -1;
@@ -190,11 +200,17 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
             return 0;
         }
 
+        // Once over the window, every further read lands back at the start of the
+        // buffer and is overwritten: the message is being discarded, not assembled.
         if (total >= cap)
         {
-            ESP_LOGE(TAG, "inbound message exceeds %u bytes - closing the pipe",
-                     static_cast<unsigned>(cap));
-            return -1;
+            if (!overlong)
+            {
+                ESP_LOGW(TAG, "inbound message over the %u-byte window - discarding "
+                         "it, keeping the pipe", static_cast<unsigned>(cap));
+                overlong = true;
+            }
+            total = 0;
         }
 
         const int n = esp_transport_read(ws_, reinterpret_cast<char*>(buf + total),
@@ -228,11 +244,13 @@ int RelaySocket::ReadFrame(uint8_t* buf, size_t cap, int timeoutMs)
             // Nothing is half-arrived any more, so go back to waiting for a message to
             // start — discarding one must not shorten the caller's idle window.
             total = 0;
+            overlong = false;
             deadline = idleDeadline;
             continue;
         }
         if (!fin) continue;
 
+        if (overlong) return READ_TOO_LONG;
         return static_cast<int>(total);
     }
 }

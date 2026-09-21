@@ -63,11 +63,17 @@ public:
     /// never got an HTTP response at all. Only meaningful next to `Refused`.
     int LastHttpStatus() const { return httpStatus_; }
 
+    /// A message longer than `buf`: read to its end and discarded, so the PIPE IS
+    /// STILL IN SYNC and every other channel on it is unharmed. Distinct from -1
+    /// because the two want opposite responses -- reconnect, versus refuse one
+    /// channel and carry on. It used to be -1, which let one oversized message
+    /// from the relay drop the whole connection.
+    static constexpr int READ_TOO_LONG = -2;
+
     /// The next data message, whole, into `buf`. Returns its length; 0 when nothing
-    /// arrived within `timeoutMs`; -1 when the link is dead and wants reconnecting.
-    /// Fragmented messages are stitched together — a message too large for `buf` is
-    /// a misconfigured peer, so it closes the link rather than silently dropping a
-    /// chunk out of somebody's firmware image.
+    /// arrived within `timeoutMs`; -1 when the link is dead and wants reconnecting;
+    /// READ_TOO_LONG when it did not fit (see above). Fragmented messages are
+    /// stitched together, so a WS frame boundary is never a channel chunk boundary.
     ///
     /// `timeoutMs` bounds the wait for a message to START. Once one has started,
     /// STALL_TIMEOUT_MS bounds how long it may make no progress — so a caller free to

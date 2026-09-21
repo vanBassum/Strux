@@ -4,6 +4,7 @@
 #include "Transport.h"
 #include "ChannelProtocol.h"
 #include <esp_http_server.h>
+#include "esp_log.h"
 #include <cstdint>
 #include <cstddef>
 
@@ -30,9 +31,15 @@ class WsTransport : public Transport
 
     httpd_req_t* req_;
     Mutex& sendMutex_;
+    size_t inboundLimit_;
 
 public:
-    WsTransport(httpd_req_t* req, Mutex& sendMutex) : req_(req), sendMutex_(sendMutex) {}
+    // `inboundLimit` is what the owner's receive buffer can hold, reported back
+    // through Transport::InboundLimit for diagnostics. RecvChunk enforces the
+    // capacity it is actually handed, so this never becomes a second source of
+    // truth about the size.
+    WsTransport(httpd_req_t* req, Mutex& sendMutex, size_t inboundLimit = 0)
+        : req_(req), sendMutex_(sendMutex), inboundLimit_(inboundLimit) {}
 
     // `frame` is [channel|flags|payload]; `len` is the total (header + payload).
     bool SendRaw(const uint8_t* frame, size_t len) override
@@ -46,24 +53,67 @@ public:
         return httpd_ws_send_frame(req_, &f) == ESP_OK;
     }
 
+private:
+    // Read and throw away a frame whose header has already been taken off the
+    // socket, `remaining` bytes of payload at a time, using `buf` as a sink.
+    //
+    // This is what keeps an oversized frame from killing the connection.
+    // httpd_ws_recv_frame refuses outright when the frame does not fit, WITHOUT
+    // consuming the payload, so the next read takes body bytes for a frame header
+    // and the socket is finished. Draining puts the stream back in sync and costs
+    // only the bytes themselves.
+    //
+    // It works because a frame passed in with `len` already set skips the header
+    // parse and reads exactly that many bytes (see httpd_ws.c) - the same two-step
+    // this class already relies on. The payload comes back unmasked from the wrong
+    // offset for every gulp after the first, because the mask cursor restarts each
+    // call and IDF does not expose it. That is irrelevant to a reader that is
+    // discarding, and it is the reason this drains rather than reassembles.
+    bool DrainFrame(size_t remaining, uint8_t* buf, size_t cap)
+    {
+        while (remaining > 0)
+        {
+            httpd_ws_frame_t g = {};
+            g.len = remaining < cap ? remaining : cap;
+            g.payload = buf;
+            if (httpd_ws_recv_frame(req_, &g, g.len) != ESP_OK) return false;
+            remaining -= g.len;
+        }
+        return true;
+    }
+
+public:
+    size_t InboundLimit() const override { return inboundLimit_; }
+
     // Receive the next inbound WS frame into `buf` (capacity `cap`) as a channel
     // chunk. On success returns the payload length (>= 0), fills *sid / *flags
     // from the 3-byte header, and leaves the payload at buf + HEADER_LEN.
-    // Returns -1 on error, an over-long frame, or a non-data frame (CLOSE/PING) —
-    // the caller treats -1 as end-of-stream.
+    //
+    // RECV_EOF on a broken link or a non-data frame (CLOSE/PING). RECV_TOO_LONG
+    // when the peer framed more than fits: the frame is drained first, so the
+    // socket survives and only the one channel is lost.
     int RecvChunk(uint8_t* buf, size_t cap, uint16_t* sid, uint8_t* flags) override
     {
-        if (httpd_ws_get_frame_type(req_) != ESP_OK) return -1;
+        if (httpd_ws_get_frame_type(req_) != ESP_OK) return RECV_EOF;
 
         httpd_ws_frame_t f = {};                       // len==0 → header-only read
-        if (httpd_ws_recv_frame(req_, &f, 0) != ESP_OK) return -1;
+        if (httpd_ws_recv_frame(req_, &f, 0) != ESP_OK) return RECV_EOF;
 
         if (f.type != HTTPD_WS_TYPE_BINARY && f.type != HTTPD_WS_TYPE_CONTINUE)
-            return -1;                                 // CLOSE/PING/TEXT → end of stream
-        if (f.len < channel::HEADER_LEN || f.len > cap) return -1;
+            return RECV_EOF;                           // CLOSE/PING/TEXT → end of stream
+
+        if (f.len > cap)
+        {
+            ESP_LOGW(TAG, "inbound frame %u > %u-byte window - dropping the frame, "
+                     "keeping the socket", static_cast<unsigned>(f.len),
+                     static_cast<unsigned>(cap));
+            if (!DrainFrame(f.len, buf, cap)) return RECV_EOF;
+            return RECV_TOO_LONG;
+        }
+        if (f.len < channel::HEADER_LEN) return RECV_EOF;
 
         f.payload = buf;
-        if (httpd_ws_recv_frame(req_, &f, cap) != ESP_OK) return -1;
+        if (httpd_ws_recv_frame(req_, &f, cap) != ESP_OK) return RECV_EOF;
 
         *sid   = channel::readU16(buf);
         *flags = buf[2];
@@ -101,8 +151,10 @@ public:
         return httpd_ws_send_frame_async(server_, fd_, &f) == ESP_OK;
     }
 
+    size_t InboundLimit() const override { return 0; }   // push only
+
     int RecvChunk(uint8_t*, size_t, uint16_t*, uint8_t*) override
     {
-        return -1;   // push only
+        return RECV_EOF;   // push only
     }
 };

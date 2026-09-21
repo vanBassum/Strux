@@ -15,6 +15,14 @@
 // Channel on its own stack, feeds it the first chunk, and hands it to
 // CommandManager::Execute.
 //
+// NEITHER DIRECTION IS SIZED BY THE TRANSPORT. write() splits the reply at
+// whatever payload capacity it was handed, emitting non-final DATA chunks; read()
+// pulls further chunks until one carries FLAG_FINAL. So a Channel of any length
+// works over a link that frames in 256 bytes or 4096, and two peers on one link
+// need not have chosen the same number. The only rule is the one a sender cannot
+// break silently: a single chunk must fit the RECEIVER's buffer, which is why
+// RecvChunk reports overrunning it as a channel fault rather than a dead link.
+//
 // read() = the request bytes; write() = the reply, accumulated and flushed as
 // binary DATA chunks, closed by finish() with FLAG_FINAL. The reply is assembled
 // directly into an EXTERNAL framing buffer (owned by the transport, off the
@@ -92,6 +100,25 @@ class Channel : public Stream
             if (reqFinal_ || failed_) return false;    // EOF
             uint16_t sid = 0; uint8_t flags = 0;
             int n = link_.RecvChunk(inBuf_, inCap_, &sid, &flags);
+            if (n == Transport::RECV_TOO_LONG)
+            {
+                // The peer framed a chunk bigger than this link can receive. The
+                // transport has already discarded it, so the link is fine and every
+                // other channel on it is untouched -- this request alone is lost.
+                //
+                // failed_ rather than a RESET from in here: the handler is mid-read
+                // and owns the reply direction, and everything that needs all of its
+                // input already asks failed(). A RESET raised underneath it would
+                // race the reply it is about to write.
+                ESP_LOGE("Channel",
+                         "channel %u: peer sent a chunk over this link's %u-byte "
+                         "inbound limit after %u bytes - request lost, link kept",
+                         static_cast<unsigned>(id_),
+                         static_cast<unsigned>(link_.InboundLimit()),
+                         static_cast<unsigned>(consumed_));
+                failed_ = true;
+                return false;
+            }
             if (n < 0)
             {
                 // Logged because the caller sees 0, the same as a clean end of

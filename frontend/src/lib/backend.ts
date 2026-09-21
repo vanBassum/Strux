@@ -718,8 +718,11 @@ class BackendService {
       // OPEN, not FINAL: the body follows on the same channel.
       this.sendChunk(session, FLAG_OPEN, envelope)
 
-      // CHUNK matches the device's inbound window: a larger frame is refused, not
-      // split.
+      // Kept under the smallest inbound window on the path — the device's own, or
+      // the relay's when there is one in between. It is a CONVENTION, not a
+      // contract: each hop owns its own framing and neither tells us its number.
+      // Overshooting now costs this one channel a RESET rather than the socket,
+      // which is what makes picking conservatively here good enough.
       const CHUNK = 4096
       let sent = 0
       while (sent < total) {
@@ -787,7 +790,8 @@ class BackendService {
       // OPEN, not FINAL: the body follows on the same channel.
       this.sendChunk(session, FLAG_OPEN, envelope)
 
-      // Body chunks. CHUNK matches the device's inbound window (see WebSocketHandler).
+      // Body chunks, kept under the smallest inbound window on the path. See the
+      // note on the other CHUNK above: a convention, not a negotiated limit.
       const CHUNK = 4096
       let sent = 0
       while (sent < total) {
