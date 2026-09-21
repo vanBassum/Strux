@@ -9,34 +9,6 @@ Last updated 2026-09-21.
 
 ## Now
 
-**The Connection + Channel protocol has replaced `Session`, and it is live.** Plan and
-phases are [issue #38](https://github.com/vanBassum/Strux/issues/38). Phases 0-3 are in;
-the wire break is done and **relay v0.8.2 is deployed**.
-
-Device and browser are peers: a CONTROL handshake (u8 version, u64 nonce) the moment the
-transport is up, nonce-decided id halves, OPEN and RESET, and no reserved ids at all.
-Logs and telemetry are channels the device opens and names; hello is gone and identity is
-`system info`. Verified 7/7 both directly over the LAN and through the deployed relay:
-handshake to READY, disjoint halves, command, device-opened log stream, stale non-OPEN
-frame dropped, `RESET "busy"` on a concurrent OPEN, in-band cancel that leaves the
-connection serving, and protocol 99 refused. A real fork device on old firmware
-(`PSU 1 Chlorate`, 0.0.6) still answers through the same relay on the legacy wire, so no
-fork needs a flag day.
-
-Deploying found two relay bugs the build could not: a RESET queued behind a gate wait
-(v0.8.1) and residue taking the pipe for fifteen seconds (v0.8.2). Both fixed and live.
-
-**Outstanding, and the one thing left before Phase 3 is closed: nobody has opened the new
-UI in a real browser.** The wire is driven by a script that reimplements the peer;
-the shipped bundle is typechecked but the actual page -- handshake on load, READY gating,
-the Console fed by a device-opened stream, an upload and its cancel button -- has not been
-looked at. `/devices/{id}/ws` sits behind Authentik, so it needs someone logged in.
-Phase 4 is not started.
-→ [`reasoning/...three-reserved-ids...`](reasoning/2026-09-21-11h30-three-reserved-ids-are-one-missing-capability.md),
-[`reasoning/...head-of-line-blocking...`](reasoning/2026-09-21-11h40-head-of-line-blocking-is-an-execution-choice-and-the-receiver-must-demultiplex-anyway.md),
-[`reasoning/...not-a-flag-day...`](reasoning/2026-09-21-11h50-a-protocol-break-is-not-a-flag-day-when-the-first-frame-dates-the-peer.md),
-[`reasoning/...one-callback-slot...`](reasoning/2026-09-21-12h40-a-fan-out-is-what-one-callback-slot-costs.md)
-
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the
 whole registry in one reply and `system describe` returns the product's own description
