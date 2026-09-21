@@ -43,12 +43,12 @@ Strux/
 │   │   ├── CommandManager/            # Command dispatch (WebSocket + relay)
 │   │   ├── ConsoleManager/            # Log capture + WebSocket broadcast
 │   │   ├── NetworkManager/            # WiFi STA/AP with retry and fallback
+│   │   ├── PartitionManager/          # Partitions by label: read, write, erase, boot slot
 │   │   ├── RelayManager/              # Outbound pipe for off-LAN access
 │   │   ├── SettingsManager/           # NVS key-value store
 │   │   ├── SystemManager/             # Device identity, ping/info/reboot
 │   │   ├── TelemetryManager/          # Measurements out via the relay
 │   │   ├── TimeManager/               # SNTP + timezone
-│   │   ├── UpdateManager/             # OTA firmware, any partition by label
 │   │   ├── WebServerManager/          # HTTP + WebSocket server
 │   │   └── lib/                       # Reusable utilities
 │   │       ├── common/                # Stream, MemoryStream, BufferStream, Fatal
@@ -193,7 +193,7 @@ StruxContext (the framework — answers StruxProvider)
 │   └── WiFiInterface     — ESP WiFi abstraction (swappable for Ethernet)
 ├── TimeManager           — SNTP time sync with timezone support
 ├── CommandManager        — Pure dispatcher for commands registered by other managers
-├── UpdateManager         — Session-based updates to any partition by label
+├── PartitionManager      — Partitions by label: read, write, erase, boot slot
 ├── WebServerManager      — HTTP + WebSocket server, static file serving
 │   ├── StaticFileHandler
 │   └── WebSocketHandler

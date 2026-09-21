@@ -8,7 +8,7 @@
 #include "SettingsManager/SettingsManager.h"
 #include "SystemManager/SystemManager.h"
 #include "TimeManager/TimeManager.h"
-#include "UpdateManager/UpdateManager.h"
+#include "PartitionManager/PartitionManager.h"
 #include "WebServerManager/WebServerManager.h"
 
 // The framework layer's context: owns every Strux manager and answers StruxProvider.
@@ -35,7 +35,7 @@ public:
         networkManager_.Init();
         timeManager_.Init();
         commandManager_.Init();
-        updateManager_.Init();
+        partitionManager_.Init();
         webServerManager_.Init();
         // After WebServer: shares its Authenticator, and its log fan-out target.
         relayManager_.Init();
@@ -51,7 +51,7 @@ public:
     SettingsManager& getSettingsManager() override { return settingsManager_; }
     SystemManager& getSystemManager() override { return systemManager_; }
     TimeManager& getTimeManager() override { return timeManager_; }
-    UpdateManager& getUpdateManager() override { return updateManager_; }
+    PartitionManager& getPartitionManager() override { return partitionManager_; }
     WebServerManager& getWebServerManager() override { return webServerManager_; }
 
 private:
@@ -61,7 +61,7 @@ private:
     NetworkManager networkManager_{*this};
     TimeManager timeManager_{*this};
     CommandManager commandManager_{*this};
-    UpdateManager updateManager_{*this};
+    PartitionManager partitionManager_{*this};
     WebServerManager webServerManager_{*this};
     RelayManager relayManager_{*this};
     TelemetryManager telemetryManager_{*this};

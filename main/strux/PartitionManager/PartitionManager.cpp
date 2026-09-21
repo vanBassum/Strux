@@ -1,4 +1,4 @@
-#include "UpdateManager.h"
+#include "PartitionManager.h"
 #include "PartitionWriter.h"
 #include "CommandManager.h"
 #include "esp_log.h"
@@ -9,12 +9,12 @@
 #include <cstring>
 #include <cstdio>
 
-UpdateManager::UpdateManager(StruxProvider& strux)
+PartitionManager::PartitionManager(StruxProvider& strux)
     : strux_(strux)
 {
 }
 
-void UpdateManager::Init()
+void PartitionManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
     if (!initAttempt)
@@ -41,13 +41,13 @@ void UpdateManager::Init()
 // and Session lends both out (Stream::canLend), so these handlers move bytes between
 // flash and a buffer they do not own.
 
-const char* UpdateManager::GetRunningPartition() const
+const char* PartitionManager::GetRunningPartition() const
 {
     const esp_partition_t* p = esp_ota_get_running_partition();
     return p ? p->label : "unknown";
 }
 
-const char* UpdateManager::GetNextPartition() const
+const char* PartitionManager::GetNextPartition() const
 {
     const esp_partition_t* p = esp_ota_get_next_update_partition(nullptr);
     return p ? p->label : "none";
@@ -57,7 +57,7 @@ const char* UpdateManager::GetNextPartition() const
 // Partition enumeration
 // ──────────────────────────────────────────────────────────────
 
-int UpdateManager::GetPartitions(PartitionInfo* out, int maxCount) const
+int PartitionManager::GetPartitions(PartitionInfo* out, int maxCount) const
 {
     const esp_partition_t* running = esp_ota_get_running_partition();
     const esp_partition_t* next    = esp_ota_get_next_update_partition(nullptr);
@@ -134,7 +134,7 @@ int UpdateManager::GetPartitions(PartitionInfo* out, int maxCount) const
 // Status / enumeration commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError UpdateManager::Cmd_UpdateStatus(CommandContext& ctx)
+RequestError PartitionManager::Cmd_UpdateStatus(CommandContext& ctx)
 {
     RETURN_IF_ERROR(ctx.readArgs());
 
@@ -148,7 +148,7 @@ RequestError UpdateManager::Cmd_UpdateStatus(CommandContext& ctx)
     return RequestError::Ok;
 }
 
-RequestError UpdateManager::Cmd_Partitions(CommandContext& ctx)
+RequestError PartitionManager::Cmd_Partitions(CommandContext& ctx)
 {
     static constexpr int MAX_PARTITIONS = 16;
     PartitionInfo parts[MAX_PARTITIONS];
@@ -181,7 +181,7 @@ RequestError UpdateManager::Cmd_Partitions(CommandContext& ctx)
 // Envelope: {"type":"writePartition","partition":"<label>"}\n<bytes…>
 // ──────────────────────────────────────────────────────────────
 
-RequestError UpdateManager::Cmd_WritePartition(CommandContext& ctx)
+RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 {
     // Reply is a stream of newline-free JSON messages, one per chunk: zero or more
     // progress reports {"p":<bytesWritten>} flushed as they happen, then a final
@@ -302,7 +302,7 @@ RequestError UpdateManager::Cmd_WritePartition(CommandContext& ctx)
 // Converted first because they are new and nothing in the web UI calls them yet, so
 // the format can be proven on hardware without touching the frontend.
 
-RequestError UpdateManager::Cmd_ClearPartition(CommandContext& ctx)
+RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 {
     char label[17] = {};
     RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
@@ -319,7 +319,7 @@ RequestError UpdateManager::Cmd_ClearPartition(CommandContext& ctx)
     return RequestError::Ok;
 }
 
-RequestError UpdateManager::Cmd_ActivatePartition(CommandContext& ctx)
+RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
 {
     char label[17] = {};
     bool restart   = false;
@@ -363,7 +363,7 @@ RequestError UpdateManager::Cmd_ActivatePartition(CommandContext& ctx)
 // Partition download — tiny JSON request in, raw bytes out
 // ──────────────────────────────────────────────────────────────
 
-RequestError UpdateManager::Cmd_DownloadPartition(CommandContext& ctx)
+RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
 {
     char label[17] = {};
     RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,

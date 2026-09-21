@@ -7,14 +7,14 @@
 
 class Stream;
 
-class UpdateManager {
-    static constexpr const char* TAG = "UpdateManager";
+class PartitionManager {
+    static constexpr const char* TAG = "PartitionManager";
 
 public:
-    explicit UpdateManager(StruxProvider& strux);
+    explicit PartitionManager(StruxProvider& strux);
 
-    UpdateManager(const UpdateManager&) = delete;
-    UpdateManager& operator=(const UpdateManager&) = delete;
+    PartitionManager(const PartitionManager&) = delete;
+    PartitionManager& operator=(const PartitionManager&) = delete;
 
     void Init();
 
@@ -78,26 +78,26 @@ private:
     RequestError Cmd_ActivatePartition(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
-        { "partition", "status",   &InvokeCommand<&UpdateManager::Cmd_UpdateStatus>,
+        { "partition", "status",   &InvokeCommand<&PartitionManager::Cmd_UpdateStatus>,
           "Report the running firmware version, which app slot it booted from, and "
           "which slot the next update would be written to." },
-        { "partition", "list",     &InvokeCommand<&UpdateManager::Cmd_Partitions>,
+        { "partition", "list",     &InvokeCommand<&PartitionManager::Cmd_Partitions>,
           "List the flash partitions with type, offset, size, and whether each is "
           "running, is the next OTA slot, or may be written to." },
-        { "partition", "write",    &InvokeCommand<&UpdateManager::Cmd_WritePartition>,
+        { "partition", "write",    &InvokeCommand<&PartitionManager::Cmd_WritePartition>,
           "Write an image to a partition. The bytes follow the request envelope in "
           "the same session, so this is a streaming upload rather than an argument. "
           "Destructive: it overwrites what the device boots or serves." },
-        { "partition", "clear",    &InvokeCommand<&UpdateManager::Cmd_ClearPartition>,
+        { "partition", "clear",    &InvokeCommand<&PartitionManager::Cmd_ClearPartition>,
           "Erase a partition. Destructive and immediate - the running app slot is "
           "refused, anything else is erased." },
-        { "partition", "activate", &InvokeCommand<&UpdateManager::Cmd_ActivatePartition>,
+        { "partition", "activate", &InvokeCommand<&PartitionManager::Cmd_ActivatePartition>,
           "Choose which app partition boots, and optionally reboot into it now. "
           "This is the only command that changes the boot slot: an upload leaves "
           "it alone, so a written image sits inert until this says otherwise, and "
           "'system reboot' returns to the same image every time. An image that "
           "does not validate is refused." },
-        { "partition", "read",     &InvokeCommand<&UpdateManager::Cmd_DownloadPartition>,
+        { "partition", "read",     &InvokeCommand<&PartitionManager::Cmd_DownloadPartition>,
           "Read a partition back. The reply is the raw partition bytes and nothing "
           "else - no header record - streamed until the session closes, which can "
           "be megabytes. The size is what 'partition list' reports." },

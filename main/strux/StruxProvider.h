@@ -24,7 +24,7 @@ class SettingsManager;
 class SystemManager;
 class TelemetryManager;
 class TimeManager;
-class UpdateManager;
+class PartitionManager;
 class WebServerManager;
 
 class StruxProvider
@@ -38,6 +38,6 @@ public:
     virtual SystemManager& getSystemManager() = 0;
     virtual TelemetryManager& getTelemetryManager() = 0;
     virtual TimeManager& getTimeManager() = 0;
-    virtual UpdateManager& getUpdateManager() = 0;
+    virtual PartitionManager& getPartitionManager() = 0;
     virtual WebServerManager& getWebServerManager() = 0;
 };
