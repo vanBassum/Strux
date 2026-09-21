@@ -37,10 +37,12 @@ private:
     Authenticator* auth_ = nullptr;
     ConsoleManager* console_ = nullptr;
 
-    // Serializes ALL outgoing frame writes. Broadcasts run on the
-    // ConsoleManager task while command responses are written by the
-    // httpd task — unserialized, their bytes interleave on the socket
-    // and corrupt the WS framing (client sees "Invalid frame header").
+    // Serializes ALL outgoing frame writes. The log pump runs on its own task
+    // while command replies are written by the httpd task - unserialized, their
+    // bytes interleave on the socket and corrupt the WS framing (the client sees
+    // "Invalid frame header"). This is the one send mutex that stays: the relay's
+    // went away when producers stopped writing its socket, but here two tasks
+    // genuinely share these.
     Mutex sendMutex_;
 
     // Per-connection auth state (replaces the ?token= upgrade check). authed is

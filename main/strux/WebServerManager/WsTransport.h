@@ -23,7 +23,7 @@ extern "C" esp_err_t httpd_ws_get_frame_type(httpd_req_t* req);
 // frame. Inbound: pulls the NEXT WS binary frame off the socket (RecvChunk), so a
 // streamed request body — arriving as several channel chunks that share one id —
 // can be drained within a single httpd handler call. The shared send mutex
-// serializes whole outbound frames so a log broadcast can't split a chunk.
+// serializes whole outbound frames so the log pump can't split a reply.
 class WsTransport : public Transport
 {
     static constexpr const char* TAG = "WsTransport";   // referenced by the LOCK macro

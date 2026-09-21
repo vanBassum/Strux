@@ -41,7 +41,7 @@ Strux/
 │   │   ├── StruxContext.h             # Owns every framework manager + the init order
 │   │   ├── StruxProvider.h            # What one framework manager may reach for
 │   │   ├── CommandManager/            # Command dispatch (WebSocket + relay)
-│   │   ├── ConsoleManager/            # Log capture + WebSocket broadcast
+│   │   ├── ConsoleManager/            # Log capture into a ring consumers read
 │   │   ├── NetworkManager/            # WiFi STA/AP with retry and fallback
 │   │   ├── PartitionManager/          # Partitions by label: read, write, erase, boot slot
 │   │   ├── RelayManager/              # Outbound pipe for off-LAN access
@@ -53,7 +53,7 @@ Strux/
 │   │   └── lib/                       # Reusable utilities
 │   │       ├── common/                # Stream, MemoryStream, BufferStream, Fatal
 │   │       ├── json/                  # JsonWriter, JsonReader
-│   │       ├── protocol/              # CommandContext, ArgReader, ReplyWriter, Session
+│   │       ├── protocol/              # Connection, Channel, Transport, ArgReader, ReplyWriter
 │   │       ├── rtos/                  # Task, Mutex, Timer, InitState
 │   │       └── system/                # DateTime, TimeSpan
 │   ├── app/                           # THE APPLICATION — this is what a fork writes
@@ -186,7 +186,7 @@ Board (bottom — depends on nothing above it)
 └── the selected board's hardware: LED, sensors, buses
 
 StruxContext (the framework — answers StruxProvider)
-├── ConsoleManager        — Captures ESP-IDF logs, broadcasts via WebSocket
+├── ConsoleManager        — Captures ESP-IDF logs into a ring; each Connection holds a cursor
 ├── SettingsManager       — NVS read/write behind typed setting objects
 ├── SystemManager         — Device identity, ping/info/reboot commands
 ├── NetworkManager        — WiFi STA/AP with retry and fallback
