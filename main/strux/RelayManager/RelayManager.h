@@ -9,6 +9,7 @@
 #include "WsConnection.h"
 #include "RelaySocket.h"
 #include "RelayTransport.h"
+#include "Connection.h"
 
 class Authenticator;
 
@@ -148,12 +149,6 @@ private:
     // handed between two tasks. One task, one buffer.
     uint8_t channelFrame_[channel::HEADER_LEN + CHANNEL_WINDOW];
     uint8_t channelInbound_[channel::HEADER_LEN + INBOUND_WINDOW];
-
-    // A channel whose handler returned before the request's FINAL chunk leaves body
-    // bytes on the wire. They are skipped by id rather than blindly discarded, which
-    // is only possible now that this task does the reading.
-    uint16_t skipSid_ = 0;
-    bool     skipping_ = false;
 
     void BuildUri();
 

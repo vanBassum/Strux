@@ -2,7 +2,8 @@
 #include "CommandManager.h"
 #include "Authenticator.h"
 #include "AuthGate.h"
-#include "WsTransport.h"   // the concrete Transport for this transport
+#include "WsTransport.h"   // the concrete Transport for this socket
+#include "Connection.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -200,10 +201,11 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
         return;
     }
 
-    // The channel lives on this stack frame for exactly one dispatch: the first chunk
-    // opens it, and its FLAG_FINAL tells the Channel whether a body follows (further
-    // chunks pulled by read()) or the request ends here. Runs synchronously on the
-    // httpd task.
+    // Both transports now enter the protocol at the same point. The Connection is
+    // built on this stack because the two things it wraps are per frame here --
+    // WsTransport holds this call's httpd_req_t, AuthGate holds this connection's
+    // slot -- while the state that has to outlive the frame, the channel table,
+    // lives in the slot itself.
     //
     // The gate decides what may run before this connection has authenticated, and
     // lends its auth state to the `auth` handlers. No handshake parsing here any more
@@ -211,8 +213,9 @@ void WebSocketHandler::HandleBinary(httpd_req_t* req, const uint8_t* frame, size
     WsTransport link(req, sendMutex_);
     AuthGate gate(*conn, *auth_);
 
-    Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
-              channelInbound_, sizeof(channelInbound_));
-    s.feedRequest(payload, plen, (flags & channel::FLAG_FINAL) != 0);
-    protocol::RunCommandChannel(s, *commandManager_, gate);
+    protocol::Connection<CommandManager, AuthGate> connection(
+        conn->channels, link, *commandManager_, gate,
+        channelFrame_, CHANNEL_WINDOW,
+        channelInbound_, sizeof(channelInbound_));
+    connection.OnFrame(sid, flags, payload, plen);
 }

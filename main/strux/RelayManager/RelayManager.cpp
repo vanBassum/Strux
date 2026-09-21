@@ -420,7 +420,6 @@ void RelayManager::OnConnected()
     // even the login page that would have unlocked it.
     conn_.authed = true;
 
-    skipping_ = false;
     linkUp_ = true;
 
     // Says WHY the pipe is open, which is no longer "nobody set a password": this
@@ -473,7 +472,6 @@ int RelayManager::ReportConnectFailure(RelaySocket::ConnectResult result)
 void RelayManager::OnDisconnected()
 {
     linkUp_ = false;
-    skipping_ = false;
     socket_.Close();
 
     // Nothing to unblock: a handler waiting for its next chunk is waiting on a read
@@ -486,48 +484,30 @@ void RelayManager::HandleFrame(const uint8_t* frame, size_t len)
 {
     if (len < channel::HEADER_LEN) return;
 
-    uint16_t sid   = channel::readU16(frame);
+    uint16_t id    = channel::readU16(frame);
     uint8_t  flags = frame[2];
     const uint8_t* payload = frame + channel::HEADER_LEN;
     size_t plen = len - channel::HEADER_LEN;
-    const bool final = (flags & channel::FLAG_FINAL) != 0;
-
-    // Residue: the tail of a request whose handler already returned. Read as a fresh
-    // chunk it would be taken for a request header, and a command invented out of
-    // firmware bytes. Skipped by id, so an unrelated channel is never caught in it.
-    if (skipping_)
-    {
-        if (sid == skipSid_)
-        {
-            if (final)
-            {
-                skipping_ = false;
-                ESP_LOGW(TAG, "channel %u: skipped to the end of an abandoned body",
-                         static_cast<unsigned>(sid));
-            }
-            return;
-        }
-        skipping_ = false;   // a different channel: whatever was left is behind us
-    }
 
     // Identical to the local transport's frame path (WebSocketHandler::HandleBinary),
-    // because everything above Transport is shared: the gate says what may run yet,
-    // the chunk becomes a Channel, and CommandManager runs the command.
+    // because everything above Transport is shared: the Connection decides what this
+    // frame is, the gate says what may run yet, and CommandManager runs the command.
+    //
+    // The residue skip that used to live here is gone with it. It was this transport's
+    // own workaround for having no channel table -- the tail of a request whose handler
+    // returned early, which read as a fresh chunk would be taken for a request header
+    // and invent a command out of firmware bytes. The table knows the id is draining,
+    // so the frames are dropped by lookup rather than by a mode flag, and the local
+    // WebSocket -- which never had the workaround, and therefore had the bug -- gets
+    // the same handling from the same code.
     RelayTransport link(socket_);
     AuthGate gate(conn_, *auth_);
 
-    Channel s(sid, link, channelFrame_, CHANNEL_WINDOW,
-              channelInbound_, sizeof(channelInbound_));
-    s.feedRequest(payload, plen, final);
-    protocol::RunCommandChannel(s, strux_.getCommandManager(), gate);
-
-    // Returned without reaching FINAL — a refusal, or a handler that read less than
-    // was sent. The rest is still coming down the socket.
-    if (!s.requestEnded() && socket_.IsConnected())
-    {
-        skipSid_  = sid;
-        skipping_ = true;
-    }
+    protocol::Connection<CommandManager, AuthGate> connection(
+        conn_.channels, link, strux_.getCommandManager(), gate,
+        channelFrame_, CHANNEL_WINDOW,
+        channelInbound_, sizeof(channelInbound_));
+    connection.OnFrame(id, flags, payload, plen);
 
     // The handler just ran on this stack; if it was the deepest one yet, say so.
     CheckStackHeadroom();

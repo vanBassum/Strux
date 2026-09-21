@@ -29,10 +29,30 @@
 //
 // Both buffers are also lent out as-is (Stream::canLend and friends), which is what
 // lets a handler stream a firmware image to flash holding no buffer of its own.
+// Where a frame goes when it is not ours.
+//
+// A handler reads its own request off the wire (see ensureInput below), so it is
+// the thing holding the transport while other channels' frames arrive. It cannot
+// run them -- a Connection serves one operation at a time -- but it must not
+// destroy them either, which is what this interface is for: hand the frame to the
+// Connection, let it update its table and refuse what it cannot serve, and carry
+// on waiting for our own next chunk.
+//
+// Implemented by Connection. Optional only so that Channel stays usable without
+// one; both transports pass one.
+class ForeignFrameSink
+{
+public:
+    virtual ~ForeignFrameSink() = default;
+    virtual void OnForeignFrame(uint16_t id, uint8_t flags,
+                                const uint8_t* payload, size_t len) = 0;
+};
+
 class Channel : public Stream
 {
     uint16_t id_;
     Transport& link_;
+    ForeignFrameSink* foreign_;
 
     const uint8_t* req_ = nullptr;   // current chunk's payload
     size_t reqLen_ = 0;
@@ -66,17 +86,39 @@ class Channel : public Stream
             if (reqFinal_ || failed_) return false;    // EOF
             uint16_t sid = 0; uint8_t flags = 0;
             int n = link_.RecvChunk(inBuf_, inCap_, &sid, &flags);
-            if (n < 0 || sid != id_)
+            if (n < 0)
             {
                 // Logged because the caller sees 0, the same as a clean end of
                 // stream: without a line here a transport failure is silent, and a
                 // reader that trusts 0 to mean "complete" acts on a truncated
                 // request.
-                ESP_LOGE("Channel", "read failed after %u bytes: n=%d sid=%u (want %u)",
+                ESP_LOGE("Channel", "read failed after %u bytes: n=%d (channel %u)",
                          static_cast<unsigned>(consumed_), n,
-                         static_cast<unsigned>(sid), static_cast<unsigned>(id_));
+                         static_cast<unsigned>(id_));
                 failed_ = true;
                 return false;
+            }
+            if (sid != id_)
+            {
+                // Someone else's frame, arriving while we hold the transport. It
+                // used to fail THIS request and drop that frame on the floor, which
+                // broke two channels with one frame and left the other peer waiting
+                // out a timeout for a reply that had been discarded. Hand it over
+                // and keep waiting for ours.
+                //
+                // Without a sink there is nothing that could be done with it except
+                // what used to happen, so do that rather than loop forever.
+                if (!foreign_)
+                {
+                    ESP_LOGE("Channel", "frame for channel %u while reading %u, and "
+                             "no connection to hand it to",
+                             static_cast<unsigned>(sid), static_cast<unsigned>(id_));
+                    failed_ = true;
+                    return false;
+                }
+                foreign_->OnForeignFrame(sid, flags, inBuf_ + channel::HEADER_LEN,
+                                         static_cast<size_t>(n));
+                continue;
             }
             req_ = inBuf_ + channel::HEADER_LEN;
             reqLen_ = static_cast<size_t>(n);
@@ -88,8 +130,9 @@ class Channel : public Stream
 
 public:
     Channel(uint16_t id, Transport& link, uint8_t* buf, size_t payloadCap,
-            uint8_t* inBuf, size_t inCap)
-        : id_(id), link_(link), inBuf_(inBuf), inCap_(inCap), buf_(buf), cap_(payloadCap) {}
+            uint8_t* inBuf, size_t inCap, ForeignFrameSink* foreign = nullptr)
+        : id_(id), link_(link), foreign_(foreign),
+          inBuf_(inBuf), inCap_(inCap), buf_(buf), cap_(payloadCap) {}
 
     void feedRequest(const uint8_t* data, size_t len, bool final)
     {
