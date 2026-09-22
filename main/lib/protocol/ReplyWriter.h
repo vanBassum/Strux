@@ -21,7 +21,7 @@
 //
 // Depth is not capped. A record may open another object or array, the same way today's
 // JsonScope allows, because the alternative (a flat record, or a record plus one level
-// of list) cannot express `help list` without changing its wire shape. The cost is that
+// of list) cannot express `help` without changing its wire shape. The cost is that
 // a second writer implementation owes the whole grammar; there is only one today.
 //
 // This is NOT a builder. Bytes reach the transport on every field, nothing is buffered

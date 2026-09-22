@@ -38,7 +38,7 @@ CommandEntry SystemManager::describeCommand_{
     "system describe", &InvokeCommand<&SystemManager::Cmd_Describe>,
     "What this device IS: its name, firmware, one-line description and its "
     "full instructions - how it is meant to be driven. Pair it with "
-    "'help describe', which is the same question about the commands."
+    "'help', which is the same question about the commands."
 };
 
 void SystemManager::Init()

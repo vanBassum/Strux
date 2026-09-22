@@ -16,7 +16,7 @@
 //   • the framework, for the link state  — app_.getStrux().getRelayManager()
 //   • the framework, for settings        — led.enabled, in the settings UI with no UI
 //                                          code written
-//   • the framework, for commands        — `led get` / `led set`, in `help list` and
+//   • the framework, for commands        — `led get` / `led set`, in `help` and
 //                                          reachable over WebSocket and the relay alike
 //   • the framework, for telemetry       — a point when the indication is switched
 //

@@ -59,7 +59,7 @@ void LedManager::Apply()
 }
 
 // ──────────────────────────────────────────────────────────────
-// Commands. These appear in `help list` and work over the local WebSocket and the relay
+// Commands. These appear in `help` and work over the local WebSocket and the relay
 // alike, because a handler serves neither — it serves a CommandContext.
 // ──────────────────────────────────────────────────────────────
 

@@ -103,53 +103,27 @@ private:
     // are immortal and name/handler/ctx are written before linking.
     const CommandEntry* Find(const char* name);
 
-    /// The command `help` addresses as two words. It exists because `help list` takes
-    /// a category and a command separately and always has; a route is joined here
-    /// rather than in a buffer.
-    const CommandEntry* FindInCategory(const char* category, const char* command);
-
-    // ── help: the registry describing itself ──────────────────
+    // ── help: the registry describing itself ────────────────
     //
-    // Nothing here is a second copy of anything. The categories and names come off
-    // the chain; a command's arguments come off its own entry, where the handler
-    // reads them from. So help cannot go stale — there is nothing to update, and
-    // nothing is executed to find out.
+    // ONE command and ONE reply: every command this firmware has, with its
+    // description and its full argument declarations. A caller that has to compose
+    // a call - a person exploring, the command console in the browser, a model at
+    // the other end of the relay - knows everything after one round trip.
     //
-    //     help list                                    → every category and its commands
-    //     help list -category partition                → one category's commands
-    //     help list -category partition -command write → that command's arguments
+    // Nothing here is a second copy of anything. The names come off the chain; a
+    // command's arguments come off its own entry, where the handler reads them from.
+    // So help cannot go stale - there is nothing to update - and nothing is executed
+    // to find out, which is what makes `system reboot` safe to ask about.
+    //
+    // The list is FLAT, and the reply says nothing about categories. The first word
+    // of a name still groups, for a reader and for AuthGate, but that is a question
+    // asked ABOUT a command rather than part of what it is called - so the registry
+    // reports what a command IS and leaves the grouping to whoever wants one.
     CommandResult Cmd_Help(CommandContext& ctx);
-
-    // ── help describe: the whole registry, in one reply ───────
-    //
-    // What `help list` gives a human exploring, given instead to something that has
-    // to compose a call without asking again: every category, every command, its
-    // one-line description and its full argument declarations, in one round trip.
-    //
-    // The same facts as walking `help list` N+1 times, and deliberately the same
-    // MECHANISM — the chain for the routes, each entry for its arguments — so there
-    // is still nothing to keep in step. What it saves is a round trip per
-    // command, which over a relay pipe is the difference between describing a device
-    // once and describing it twenty times.
-    CommandResult Cmd_Describe(CommandContext& ctx);
-
-    static constexpr size_t MAX_CATEGORIES = 24;
-
-    void ListCategories(ReplyWriter& reply);
-    void ListCategory(const char* category, ReplyWriter& reply);
-    CommandResult DescribeCommand(const char* category, const char* command,
-                                  ReplyWriter& reply);
 
     /// Writes one command's declared arguments into `args`, straight off its entry.
     void DescribeArguments(const CommandEntry& entry, ReplyArray& args);
 
-    /// Collects one command name per distinct category into `out` — the NAME, because
-    /// a category is its first word and is not a string of its own anywhere. Caller
-    /// holds the mutex. Returns how many were found; `truncated` says the chain had
-    /// more than MAX_CATEGORIES of them.
-    size_t CollectCategories(const char** out, size_t cap, bool& truncated);
-
-    // Defined in CommandManager.cpp, beside the handlers and the arguments they read.
-    static CommandEntry listCommand_;
-    static CommandEntry describeCommand_;
+    // Defined in CommandManager.cpp, beside the handler and the chain it walks.
+    static CommandEntry helpCommand_;
 };
