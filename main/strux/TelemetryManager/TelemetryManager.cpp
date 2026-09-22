@@ -98,8 +98,6 @@ void TelemetryManager::SampleVitals()
 // here because it is the reason `dropped` climbs in practice.
 RequestError TelemetryManager::Cmd_Stats(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
     resp.field("enabled", enabled_.Get());
     resp.field("intervalSec", intervalSec_.Get());

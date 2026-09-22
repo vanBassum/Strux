@@ -217,8 +217,6 @@ bool SettingsManager::WriteString(const char* key, const char* v)
 
 RequestError SettingsManager::Cmd_GetSettings(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto root     = ctx.reply.object();
     auto settings = root.array("settings");
 
@@ -292,8 +290,6 @@ RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
 
 RequestError SettingsManager::Cmd_SaveSettings(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
     resp.field("ok", Save());
     return RequestError::Ok;

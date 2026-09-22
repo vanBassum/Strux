@@ -47,10 +47,8 @@ struct CommandEntry
     /// the handler reads, so ctx.arg() matches by identity and there is no second
     /// place for an argument's name or type to live.
     ///
-    /// Empty means the command has NOT been converted to static declarations yet, and
-    /// still declares its arguments by calling ctx.readArgs() inside its handler --
-    /// which is also how `help` still has to describe it. The distinction disappears
-    /// with the last unconverted command.
+    /// Empty means the command takes no arguments, and `help` says so without
+    /// running anything.
     ///
     /// One slot longer than a command may declare, so the terminator always fits;
     /// Register() refuses a table that fills it.

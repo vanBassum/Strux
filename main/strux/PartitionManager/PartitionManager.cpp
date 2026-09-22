@@ -206,8 +206,6 @@ int PartitionManager::GetPartitions(PartitionInfo* out, int maxCount) const
 
 RequestError PartitionManager::Cmd_UpdateStatus(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
 
     const esp_app_desc_t* app = esp_app_get_description();
@@ -222,8 +220,6 @@ RequestError PartitionManager::Cmd_Partitions(CommandContext& ctx)
 {
     static constexpr int MAX_PARTITIONS = 16;
     PartitionInfo parts[MAX_PARTITIONS];
-    RETURN_IF_ERROR(ctx.readArgs());
-
     int count = GetPartitions(parts, MAX_PARTITIONS);
 
     auto root = ctx.reply.object();

@@ -84,8 +84,6 @@ CommandEntry LedManager::commands_[2] = {
 
 RequestError LedManager::Cmd_Get(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
     resp.field("enabled", enabled_.Get());
     resp.field("connected", app_.getStrux().getRelayManager().IsConnected());

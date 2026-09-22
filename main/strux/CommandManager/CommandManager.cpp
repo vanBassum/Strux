@@ -266,64 +266,38 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
         resp.field("description", e->help);
 
     auto args = resp.array("arguments");
-    if (!DescribeArguments(*e, args))
-        resp.field("declared", false);   // writing to the parent closes `args`
+    DescribeArguments(*e, args);
 
     return RequestError::Ok;
 }
 
-bool CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& args)
+void CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& args)
 {
-    if (entry.args[0] != nullptr)
+    // Read, never run. Every command declares its arguments statically, so nothing
+    // here dispatches and a handler's body can no longer execute under `help`.
+    for (int i = 0; entry.args[i] != nullptr; ++i)
     {
-        // Static declarations: read, not run. Nothing is dispatched, so nothing can
-        // reach a handler's body, and a command without arguments is describable the
-        // moment it says so rather than by being executed carefully.
-        for (int i = 0; entry.args[i] != nullptr; ++i)
-        {
-            const ArgDesc& d = *entry.args[i];
-            auto arg = args.object();
-            arg.field("name", d.name);
-            arg.field("type", ArgTypeName(d.type));
-            arg.field("required", d.required);
-            if (d.type == ArgType::String)
-                arg.field("maxLength", static_cast<uint32_t>(d.maxLength));
-            // Absent rather than empty when the command did not describe it, so a
-            // reader can tell "nothing was said" from "said to be nothing".
-            if (d.description != nullptr && d.description[0] != '\0')
-                arg.field("description", d.description);
-        }
-        return true;
+        const ArgDesc& d = *entry.args[i];
+        auto arg = args.object();
+        arg.field("name", d.name);
+        arg.field("type", ArgTypeName(d.type));
+        arg.field("required", d.required);
+        if (d.type == ArgType::String)
+            arg.field("maxLength", static_cast<uint32_t>(d.maxLength));
+        // Absent rather than empty when the command did not describe it, so a
+        // reader can tell "nothing was said" from "said to be nothing".
+        if (d.description != nullptr && d.description[0] != '\0')
+            arg.field("description", d.description);
     }
-
-    // Not through Execute(): that one is the wire path — it builds the reader for
-    // today's format and reports which argument a parse tripped over. Here the reader
-    // IS the point, and there is no request to parse.
-    DescribeArgReader reader(args);
-    NullStream sink;
-    JsonReplyWriter nowhere(sink);   // the described handler is stopped before it replies
-    CommandContext described(reader, nowhere, sink, sink, nullptr);
-
-    if (entry.handler(entry.ctx, described) == RequestError::Described)
-        return true;
-
-    // The handler returned without ever asking for its arguments, which means it ran
-    // its body — under help, against streams that go nowhere. Nothing here can undo
-    // that; the fix is a readArgs call in the handler.
-    ESP_LOGE(TAG, "'%s %s' declares no arguments - its body ran under help",
-             entry.category, entry.name);
-    return false;
 }
 
 RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
 {
     const char* category = ctx.arg(describeCategoryArg);
 
-    // Held across the whole reply, for the same reason ListCategories holds it — and
-    // with one addition: every handler on the chain is re-dispatched from in here.
-    // That is safe because a described handler is stopped at its own readArgs before
-    // its body runs, so it registers nothing and dispatches nothing; the mutex is
-    // recursive anyway, so a handler that did would not deadlock.
+    // Held across the whole reply, for the same reason ListCategories holds it: a
+    // manager registering from another task must not relink the chain half way
+    // through the answer. Nothing is dispatched from in here any more.
     LOCK(mutex_);
 
     const char* seen[MAX_CATEGORIES];
@@ -353,13 +327,7 @@ RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
                     cmd.field("description", e->help);
 
                 auto args = cmd.array("arguments");
-                if (!DescribeArguments(*e, args))
-                {
-                    // An undeclared handler wrote nothing to the array, and an empty
-                    // array reads as "takes no arguments" — which is a lie a caller
-                    // would act on. Writing to the parent closes `args` and says so.
-                    cmd.field("declared", false);
-                }
+                DescribeArguments(*e, args);
             }
         }
     }

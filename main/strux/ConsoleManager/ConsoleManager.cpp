@@ -251,8 +251,6 @@ void ConsoleManager::WriteHistory(ReplyObject& resp) const
 
 RequestError ConsoleManager::Cmd_GetLogs(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
     WriteHistory(resp);
     return RequestError::Ok;

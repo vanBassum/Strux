@@ -100,9 +100,9 @@ private:
     // ── help: the registry describing itself ──────────────────
     //
     // Nothing here is a second copy of anything. The categories and names come off
-    // the chain; a command's arguments come from the command, by re-dispatching it
-    // with a reader that prints the declarations instead of filling them (see
-    // DescribeArgReader). So help cannot go stale — there is nothing to update.
+    // the chain; a command's arguments come off its own entry, where the handler
+    // reads them from. So help cannot go stale — there is nothing to update, and
+    // nothing is executed to find out.
     //
     //     help list                                    → every category and its commands
     //     help list -category partition                → one category's commands
@@ -116,8 +116,8 @@ private:
     // one-line description and its full argument declarations, in one round trip.
     //
     // The same facts as walking `help list` N+1 times, and deliberately the same
-    // MECHANISM — the chain for the routes, the handler itself for the arguments —
-    // so there is still nothing to keep in step. What it saves is a round trip per
+    // MECHANISM — the chain for the routes, each entry for its arguments — so there
+    // is still nothing to keep in step. What it saves is a round trip per
     // command, which over a relay pipe is the difference between describing a device
     // once and describing it twenty times.
     RequestError Cmd_Describe(CommandContext& ctx);
@@ -129,11 +129,8 @@ private:
     RequestError DescribeCommand(const char* category, const char* command,
                                  ReplyWriter& reply);
 
-    /// Writes one command's declared arguments into `args`, by re-dispatching it with
-    /// a reader that prints declarations instead of filling them. Returns false when
-    /// the handler never asked for its arguments — which means its body ran, and is
-    /// the caller's cue to say so.
-    bool DescribeArguments(const CommandEntry& entry, ReplyArray& args);
+    /// Writes one command's declared arguments into `args`, straight off its entry.
+    void DescribeArguments(const CommandEntry& entry, ReplyArray& args);
 
     /// Collects the distinct categories on the chain into `out`. Caller holds the
     /// mutex. Returns how many were found; `truncated` says the chain had more than

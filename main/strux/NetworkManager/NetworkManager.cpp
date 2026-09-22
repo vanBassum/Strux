@@ -463,8 +463,6 @@ void NetworkManager::HandleNetworkEvent(const NetworkEvent& event)
 RequestError NetworkManager::Cmd_WifiScan(CommandContext& ctx)
 {
     WiFiInterface::ScanResult results[20] = {};
-    RETURN_IF_ERROR(ctx.readArgs());
-
     int count = wifi().Scan(results, 20);
 
     auto root = ctx.reply.object();

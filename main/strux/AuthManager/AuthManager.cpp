@@ -63,8 +63,6 @@ void AuthManager::Init()
 
 RequestError AuthManager::Cmd_AuthHello(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     // Per CONNECTION, not per device. A transport whose peer is already proven
     // has nothing left to ask for, while a browser socket on a password-protected
     // device does — and both arrive here. Asking the Authenticator alone told a

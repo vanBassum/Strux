@@ -77,8 +77,6 @@ void SystemManager::GetDeviceName(char* out, size_t maxLen)
 
 RequestError SystemManager::Cmd_Ping(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
     resp.field("pong", true);
     return RequestError::Ok;
@@ -86,8 +84,6 @@ RequestError SystemManager::Cmd_Ping(CommandContext& ctx)
 
 RequestError SystemManager::Cmd_Info(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     auto resp = ctx.reply.object();
 
     const esp_app_desc_t* app = esp_app_get_description();
@@ -126,8 +122,6 @@ RequestError SystemManager::Cmd_Info(CommandContext& ctx)
 
 RequestError SystemManager::Cmd_Describe(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     const esp_app_desc_t* app = esp_app_get_description();
 
     char deviceName[48] = {};
@@ -153,8 +147,6 @@ RequestError SystemManager::Cmd_Describe(CommandContext& ctx)
 
 RequestError SystemManager::Cmd_Reboot(CommandContext& ctx)
 {
-    RETURN_IF_ERROR(ctx.readArgs());
-
     {
         auto resp = ctx.reply.object();
         resp.field("ok", true);
