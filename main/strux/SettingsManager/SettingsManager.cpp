@@ -18,6 +18,37 @@ SettingsManager::SettingsManager(StruxProvider& strux)
 {
 }
 
+namespace {
+
+constexpr CommandArg<const char*> keyArg{
+    "key", "The setting's dotted key exactly as 'settings list' reports it, "
+           "e.g. 'relay.url' or 'led.enabled'.",
+    63 };
+
+// A string whatever the setting's type is: which conversion applies is not known
+// until `key` has been resolved, so the handler does it. A typed declaration here
+// would have to be one type for every setting, which is the thing it cannot be.
+constexpr CommandArg<const char*> valueArg{
+    "value", "The new value as text: numbers in decimal, booleans as 'true' or "
+             "'false'. Omit it to clear the setting to an empty value.",
+    127, Presence::Optional };
+
+} // namespace
+
+CommandEntry SettingsManager::commands_[3] = {
+    { "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
+      "List every setting registered on this device with its key, label, type "
+      "and current value. This is the whole configuration surface - there are "
+      "no hidden keys." },
+    { "settings", "set",  &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
+      "Change one setting's value in RAM. NOT durable on its own: call "
+      "'settings save' afterwards or the change is lost at the next reboot.",
+      { &keyArg, &valueArg } },
+    { "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
+      "Commit every setting changed with 'settings set' to NVS so they survive "
+      "a reboot. Several settings only take effect after one." },
+};
+
 void SettingsManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -218,16 +249,8 @@ RequestError SettingsManager::Cmd_GetSettings(CommandContext& ctx)
 
 RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
 {
-    char key[64] = {};
-    char value[128] = {};
-    RETURN_IF_ERROR(ctx.readArgs(
-        Required("key",   key,
-                 "The setting's dotted key exactly as 'settings list' reports it, "
-                 "e.g. 'relay.url' or 'led.enabled'."),
-        Optional("value", value,
-                 "The new value as text: numbers in decimal, booleans as 'true' or "
-                 "'false'. Omit it to clear the setting to an empty value.")
-    ));
+    const char* key   = ctx.arg(keyArg);
+    const char* value = ctx.arg(valueArg);
 
     auto resp = ctx.reply.object();
 
