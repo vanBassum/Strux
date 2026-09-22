@@ -10,6 +10,35 @@ AuthManager::AuthManager(StruxProvider& strux)
 {
 }
 
+namespace {
+
+constexpr CommandArg<const char*> passwordArg{
+    "password", "The device's web password (setting 'web.password'). Omit it only to "
+                "test whether an empty password is accepted.",
+    63, Presence::Optional };
+
+// One less than ResumeTokens::TOKEN_LEN, which is 32 hex characters and a NUL.
+constexpr CommandArg<const char*> keyArg{
+    "key", "The channel key a previous successful 'auth login' returned.",
+    ResumeTokens::TOKEN_LEN - 1 };
+
+} // namespace
+
+CommandEntry AuthManager::commands_[3] = {
+    { "auth", "hello",  &InvokeCommand<&AuthManager::Cmd_AuthHello>,
+      "Ask whether this connection has to log in before anything else will be "
+      "answered. With no web password set - the default - it never does." },
+    { "auth", "login",  &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
+      "Authenticate this connection with the device's web password. On success "
+      "the reply carries a channel key that 'auth resume' takes. Failed attempts "
+      "are rate limited, and a refusal says which of the two it was.",
+      { &passwordArg } },
+    { "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
+      "Re-authenticate a reconnected client with the channel key a previous "
+      "'auth login' handed out, instead of the password again.",
+      { &keyArg } },
+};
+
 void AuthManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -50,10 +79,7 @@ RequestError AuthManager::Cmd_AuthHello(CommandContext& ctx)
 
 RequestError AuthManager::Cmd_AuthLogin(CommandContext& ctx)
 {
-    char password[64] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Optional("password", password,
-        "The device's web password (setting 'web.password'). Omit it only to test "
-        "whether an empty password is accepted.")));
+    const char* password = ctx.arg(passwordArg);
 
     auto resp = ctx.reply.object();
 
@@ -86,9 +112,7 @@ RequestError AuthManager::Cmd_AuthLogin(CommandContext& ctx)
 
 RequestError AuthManager::Cmd_AuthResume(CommandContext& ctx)
 {
-    char key[ResumeTokens::TOKEN_LEN] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("key", key,
-        "The channel key a previous successful 'auth login' returned.")));
+    const char* key = ctx.arg(keyArg);
 
     auto resp = ctx.reply.object();
 

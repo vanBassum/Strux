@@ -73,16 +73,7 @@ private:
     /// Resume with a key minted earlier.
     RequestError Cmd_AuthResume(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "auth", "hello",  &InvokeCommand<&AuthManager::Cmd_AuthHello>,
-          "Ask whether this connection has to log in before anything else will be "
-          "answered. With no web password set - the default - it never does." },
-        { "auth", "login",  &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
-          "Authenticate this connection with the device's web password. On success "
-          "the reply carries a channel key that 'auth resume' takes. Failed attempts "
-          "are rate limited, and a refusal says which of the two it was." },
-        { "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
-          "Re-authenticate a reconnected client with the channel key a previous "
-          "'auth login' handed out, instead of the password again." },
-    };
+    /// Defined in AuthManager.cpp, beside the handlers and the arguments they
+    /// read. The bound is the entry count.
+    static CommandEntry commands_[3];
 };
