@@ -5,6 +5,12 @@
 # flash, which is why the file lives here and the board's sdkconfig.defaults
 # names it.
 #
+# The C3 board's copy is byte-identical today. Do NOT consolidate them into one
+# shared file: both boards happen to have 4 MB, which is a coincidence of the
+# hardware rather than a shared fact, and a shared file would assert one board's
+# flash while another board is being built. See
+# docs/reasoning/2026-09-22-09h25-a-shared-default-that-asserts-a-hardware-fact-compares-one-board-against-another.md
+#
 # No www partition: the built frontend is packed into one blob and linked into
 # the app image (main/strux/WebAssets/), so a firmware image is the whole product
 # and the space the FAT image used is back in the two OTA slots. The slots fill
