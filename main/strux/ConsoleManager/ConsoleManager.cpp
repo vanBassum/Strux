@@ -249,9 +249,9 @@ void ConsoleManager::WriteHistory(ReplyObject& resp) const
 // WebSocket commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError ConsoleManager::Cmd_GetLogs(CommandContext& ctx)
+CommandResult ConsoleManager::Cmd_GetLogs(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
     WriteHistory(resp);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

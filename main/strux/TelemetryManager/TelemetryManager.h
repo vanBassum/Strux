@@ -129,7 +129,7 @@ public:
 
 private:
     // ── Commands (registered with CommandManager in Init) ──
-    RequestError Cmd_Stats(CommandContext& ctx);
+    CommandResult Cmd_Stats(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
         { "telemetry", "stats", &InvokeCommand<&TelemetryManager::Cmd_Stats> },

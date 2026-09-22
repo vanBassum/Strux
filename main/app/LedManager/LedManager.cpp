@@ -82,16 +82,16 @@ CommandEntry LedManager::commands_[2] = {
       { &enabledArg } },
 };
 
-RequestError LedManager::Cmd_Get(CommandContext& ctx)
+CommandResult LedManager::Cmd_Get(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
     resp.field("enabled", enabled_.Get());
     resp.field("connected", app_.getStrux().getRelayManager().IsConnected());
     resp.field("on", app_.getBoard().GetLed().IsOn());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError LedManager::Cmd_Set(CommandContext& ctx)
+CommandResult LedManager::Cmd_Set(CommandContext& ctx)
 {
     // "Absent means leave it alone" is the one place has() earns itself: an omitted
     // optional bool decodes as false, which would turn the indicator OFF rather than
@@ -113,5 +113,5 @@ RequestError LedManager::Cmd_Set(CommandContext& ctx)
     resp.field("enabled", enabled_.Get());
     resp.field("connected", app_.getStrux().getRelayManager().IsConnected());
     resp.field("on", app_.getBoard().GetLed().IsOn());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

@@ -26,14 +26,14 @@ void CommandManager::Init()
     ESP_LOGI(TAG, "Initialized");
 }
 
-RequestError CommandManager::Execute(const char* category, const char* name,
+CommandResult CommandManager::Execute(const char* category, const char* name,
                                      Stream& in, Stream& out,
                                      ConnectionAuth* connection,
                                      const char** failedArg)
 {
     const CommandEntry* e = Find(category, name);
     if (e == nullptr)
-        return RequestError::UnknownCommand;
+        return CommandResult::UnknownCommand;
 
     // Handler runs OUTSIDE the lock: entries are immortal, so the pointer
     // stays valid, and a handler may register commands or dispatch nested
@@ -50,8 +50,8 @@ RequestError CommandManager::Execute(const char* category, const char* name,
     if (e->args[0] != nullptr)
     {
         const char* failed = nullptr;
-        const RequestError err = DecodeJsonArgs(envelope.text(), e->args, values, failed);
-        if (err != RequestError::Ok)
+        const CommandResult err = DecodeJsonArgs(envelope.text(), e->args, values, failed);
+        if (err != CommandResult::Ok)
         {
             if (failedArg) *failedArg = failed;
             return err;
@@ -62,20 +62,20 @@ RequestError CommandManager::Execute(const char* category, const char* name,
     return e->handler(e->ctx, ctx);
 }
 
-const char* DescribeRequestError(RequestError e, const char* arg, char* buf, size_t cap)
+const char* DescribeCommandResult(CommandResult e, const char* arg, char* buf, size_t cap)
 {
-    switch (e)   // no default: a new RequestError must be handled here
+    switch (e)   // no default: a new CommandResult must be handled here
     {
-    case RequestError::Ok:              return "ok";
-    case RequestError::UnknownCommand:  return "unknown command";
-    case RequestError::MissingArgument:
+    case CommandResult::Ok:              return "ok";
+    case CommandResult::UnknownCommand:  return "unknown command";
+    case CommandResult::MissingArgument:
         snprintf(buf, cap, "missing required argument: %s", arg ? arg : "?");
         return buf;
-    case RequestError::MalformedRequest:  return "malformed request";
-    case RequestError::MalformedNumber:
+    case CommandResult::MalformedRequest:  return "malformed request";
+    case CommandResult::MalformedNumber:
         snprintf(buf, cap, "malformed number: %s", arg ? arg : "?");
         return buf;
-    case RequestError::ArgumentTooLong:
+    case CommandResult::ArgumentTooLong:
         snprintf(buf, cap, "argument too long: %s", arg ? arg : "?");
         return buf;
     }
@@ -122,7 +122,7 @@ CommandEntry CommandManager::commands_[2] = {
       { &describeCategoryArg } },
 };
 
-RequestError CommandManager::Cmd_Help(CommandContext& ctx)
+CommandResult CommandManager::Cmd_Help(CommandContext& ctx)
 {
     const char* category = ctx.arg(listCategoryArg);
     const char* command  = ctx.arg(listCommandArg);
@@ -135,7 +135,7 @@ RequestError CommandManager::Cmd_Help(CommandContext& ctx)
     else
         ListCategories(ctx.reply);
 
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 size_t CommandManager::CollectCategories(const char** out, size_t cap, bool& truncated)
@@ -215,7 +215,7 @@ void CommandManager::ListCategory(const char* category, ReplyWriter& reply)
             names.value(e->name);
 }
 
-RequestError CommandManager::DescribeCommand(const char* category, const char* command,
+CommandResult CommandManager::DescribeCommand(const char* category, const char* command,
                                              ReplyWriter& reply)
 {
     auto resp = reply.object();
@@ -226,7 +226,7 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
         // is not a route. Meaning rather than form, so it goes in the reply.
         resp.field("ok", false);
         resp.field("error", "a command needs its category");
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     const CommandEntry* e = Find(category, command);
@@ -234,7 +234,7 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
     {
         resp.field("ok", false);
         resp.field("error", "unknown command");
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     resp.field("ok", true);
@@ -246,7 +246,7 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
     auto args = resp.array("arguments");
     DescribeArguments(*e, args);
 
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 void CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& args)
@@ -269,7 +269,7 @@ void CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& ar
     }
 }
 
-RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
+CommandResult CommandManager::Cmd_Describe(CommandContext& ctx)
 {
     const char* category = ctx.arg(describeCategoryArg);
 
@@ -312,7 +312,7 @@ RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
     if (truncated)
         resp.field("truncated", true);
 
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 const CommandEntry* CommandManager::Find(const char* category, const char* name)

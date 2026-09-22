@@ -146,7 +146,7 @@ void WebServerManager::RegisterRoutes()
 // Commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
+CommandResult WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
 {
     const char* path = ctx.arg(pathArg);
 
@@ -166,7 +166,7 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
             head.field("status", static_cast<uint32_t>(404));
         }
         protocol::EndRecord(ctx.out);
-        return RequestError::Ok;   // the request was fine; the file simply is not there
+        return CommandResult::Ok;   // the request was fine; the file simply is not there
     }
 
     {
@@ -184,5 +184,5 @@ RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
     // 200 KB buffer here or on the transport — and no read buffer at all now that
     // there is no file to read.
     ctx.out.write(file.data, file.size);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

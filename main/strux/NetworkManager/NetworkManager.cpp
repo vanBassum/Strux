@@ -460,7 +460,7 @@ void NetworkManager::HandleNetworkEvent(const NetworkEvent& event)
 // WebSocket commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError NetworkManager::Cmd_WifiScan(CommandContext& ctx)
+CommandResult NetworkManager::Cmd_WifiScan(CommandContext& ctx)
 {
     WiFiInterface::ScanResult results[20] = {};
     int count = wifi().Scan(results, 20);
@@ -482,5 +482,5 @@ RequestError NetworkManager::Cmd_WifiScan(CommandContext& ctx)
         // name goes on the reply too.
         n.field("auth", WiFiInterface::AuthModeName(results[i].authmode));
     }
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

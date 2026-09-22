@@ -64,14 +64,14 @@ private:
 
     /// Does this device want a password at all? Answered before login, so a client
     /// knows whether to prompt.
-    RequestError Cmd_AuthHello(CommandContext& ctx);
+    CommandResult Cmd_AuthHello(CommandContext& ctx);
 
     /// Password in, channel key out. The key lets a reconnect resume without
     /// re-prompting.
-    RequestError Cmd_AuthLogin(CommandContext& ctx);
+    CommandResult Cmd_AuthLogin(CommandContext& ctx);
 
     /// Resume with a key minted earlier.
-    RequestError Cmd_AuthResume(CommandContext& ctx);
+    CommandResult Cmd_AuthResume(CommandContext& ctx);
 
     /// Defined in AuthManager.cpp, beside the handlers and the arguments they
     /// read. The bound is the entry count.

@@ -75,14 +75,14 @@ void SystemManager::GetDeviceName(char* out, size_t maxLen)
 // WebSocket commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError SystemManager::Cmd_Ping(CommandContext& ctx)
+CommandResult SystemManager::Cmd_Ping(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
     resp.field("pong", true);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError SystemManager::Cmd_Info(CommandContext& ctx)
+CommandResult SystemManager::Cmd_Info(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
 
@@ -117,10 +117,10 @@ RequestError SystemManager::Cmd_Info(CommandContext& ctx)
     if (now.YearLocal() >= 2020)
         now.ToStringLocal(deviceTimeStr, sizeof(deviceTimeStr), "%F %T");
     resp.field("deviceTime", deviceTimeStr);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError SystemManager::Cmd_Describe(CommandContext& ctx)
+CommandResult SystemManager::Cmd_Describe(CommandContext& ctx)
 {
     const esp_app_desc_t* app = esp_app_get_description();
 
@@ -142,10 +142,10 @@ RequestError SystemManager::Cmd_Describe(CommandContext& ctx)
     if (instructions_ != nullptr && instructions_[0] != '\0')
         resp.field("instructions", instructions_);
 
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError SystemManager::Cmd_Reboot(CommandContext& ctx)
+CommandResult SystemManager::Cmd_Reboot(CommandContext& ctx)
 {
     {
         auto resp = ctx.reply.object();

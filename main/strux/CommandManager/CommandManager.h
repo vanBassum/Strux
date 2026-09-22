@@ -80,7 +80,7 @@ public:
     /// Whether the request has already been read depends on the handler's shape:
     /// an argument-pulling handler gets its envelope consumed by the framework
     /// first, an unconverted one still parses `in` itself. See CommandEntry.
-    RequestError Execute(const char* category, const char* name,
+    CommandResult Execute(const char* category, const char* name,
                          Stream& in, Stream& out,
                          ConnectionAuth* connection = nullptr,
                          const char** failedArg = nullptr);
@@ -107,7 +107,7 @@ private:
     //     help list                                    → every category and its commands
     //     help list -category partition                → one category's commands
     //     help list -category partition -command write → that command's arguments
-    RequestError Cmd_Help(CommandContext& ctx);
+    CommandResult Cmd_Help(CommandContext& ctx);
 
     // ── help describe: the whole registry, in one reply ───────
     //
@@ -120,13 +120,13 @@ private:
     // is still nothing to keep in step. What it saves is a round trip per
     // command, which over a relay pipe is the difference between describing a device
     // once and describing it twenty times.
-    RequestError Cmd_Describe(CommandContext& ctx);
+    CommandResult Cmd_Describe(CommandContext& ctx);
 
     static constexpr size_t MAX_CATEGORIES = 24;
 
     void ListCategories(ReplyWriter& reply);
     void ListCategory(const char* category, ReplyWriter& reply);
-    RequestError DescribeCommand(const char* category, const char* command,
+    CommandResult DescribeCommand(const char* category, const char* command,
                                  ReplyWriter& reply);
 
     /// Writes one command's declared arguments into `args`, straight off its entry.

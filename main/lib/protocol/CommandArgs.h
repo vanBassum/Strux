@@ -31,7 +31,7 @@
 
 /// Ways a REQUEST can be unusable. Closed set, owned by the framework -- anything a
 /// command author wants to add is meaning, and belongs in the reply.
-enum class RequestError : uint8_t
+enum class CommandResult : uint8_t
 {
     Ok = 0,
     UnknownCommand,
@@ -208,23 +208,23 @@ namespace args_detail
     }
 
     /// Store `text` into slot `i`, converting it to that argument's type.
-    inline RequestError Convert(const ArgDesc& desc, size_t i, char* text, size_t len,
+    inline CommandResult Convert(const ArgDesc& desc, size_t i, char* text, size_t len,
                                 ArgValues& out)
     {
         switch (desc.type)   // no default: a new ArgType must be handled here
         {
         case ArgType::String:
-            if (len > desc.maxLength) return RequestError::ArgumentTooLong;
+            if (len > desc.maxLength) return CommandResult::ArgumentTooLong;
             out.set(i, static_cast<const char*>(text));
-            return RequestError::Ok;
+            return CommandResult::Ok;
 
         case ArgType::UInt32:
         {
             char* end = nullptr;
             const unsigned long v = strtoul(text, &end, 0);   // 0 -> accepts 0x...
-            if (end == text || *end != '\0') return RequestError::MalformedNumber;
+            if (end == text || *end != '\0') return CommandResult::MalformedNumber;
             out.set(i, static_cast<uint32_t>(v));
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
 
         case ArgType::Int32:
@@ -234,25 +234,25 @@ namespace args_detail
             // where a sign convention goes to be got wrong.
             char* end = nullptr;
             const long v = strtol(text, &end, 0);
-            if (end == text || *end != '\0') return RequestError::MalformedNumber;
+            if (end == text || *end != '\0') return CommandResult::MalformedNumber;
             out.set(i, static_cast<int32_t>(v));
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
 
         case ArgType::Float:
         {
             char* end = nullptr;
             const float v = strtof(text, &end);
-            if (end == text || *end != '\0') return RequestError::MalformedNumber;
+            if (end == text || *end != '\0') return CommandResult::MalformedNumber;
             out.set(i, v);
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
 
         case ArgType::Bool:
             out.set(i, strcmp(text, "true") == 0 || strcmp(text, "1") == 0);
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
-        return RequestError::MalformedRequest;
+        return CommandResult::MalformedRequest;
     }
 }
 
@@ -268,7 +268,7 @@ namespace args_detail
 /// IGNORED, deliberately and unchanged from the reader this replaces: refusing one is
 /// the behaviour we want, but it belongs with a format where an undeclared argument is
 /// unambiguous. `failed` names the argument a failure was about.
-inline RequestError DecodeJsonArgs(char* line, const ArgDesc* const* args,
+inline CommandResult DecodeJsonArgs(char* line, const ArgDesc* const* args,
                                    ArgValues& out, const char*& failed)
 {
     using namespace args_detail;
@@ -277,23 +277,23 @@ inline RequestError DecodeJsonArgs(char* line, const ArgDesc* const* args,
 
     char* p = line;
     while (IsSpace(*p)) ++p;
-    if (*p != '{') return RequestError::MalformedRequest;
+    if (*p != '{') return CommandResult::MalformedRequest;
     ++p;
 
     while (*p != '\0')
     {
         while (IsSpace(*p) || *p == ',') ++p;
         if (*p == '}' || *p == '\0') break;
-        if (*p != '"') return RequestError::MalformedRequest;
+        if (*p != '"') return CommandResult::MalformedRequest;
 
         char* key = ++p;
         while (*p != '\0' && *p != '"') { if (*p == '\\' && p[1] != '\0') ++p; ++p; }
-        if (*p != '"') return RequestError::MalformedRequest;
+        if (*p != '"') return CommandResult::MalformedRequest;
         const size_t keyLen = static_cast<size_t>(p - key);
         ++p;
 
         while (IsSpace(*p)) ++p;
-        if (*p != ':') return RequestError::MalformedRequest;
+        if (*p != ':') return CommandResult::MalformedRequest;
         ++p;
         while (IsSpace(*p)) ++p;
 
@@ -303,16 +303,16 @@ inline RequestError DecodeJsonArgs(char* line, const ArgDesc* const* args,
         {
             char* value = ++p;
             while (*p != '\0' && *p != '"') { if (*p == '\\' && p[1] != '\0') ++p; ++p; }
-            if (*p != '"') return RequestError::MalformedRequest;
+            if (*p != '"') return CommandResult::MalformedRequest;
             char* end = p;
             ++p;
 
             if (slot >= 0)
             {
                 const size_t len = Unescape(value, end);
-                const RequestError e = Convert(*args[slot], static_cast<size_t>(slot),
+                const CommandResult e = Convert(*args[slot], static_cast<size_t>(slot),
                                                value, len, out);
-                if (e != RequestError::Ok) { failed = args[slot]->name; return e; }
+                if (e != CommandResult::Ok) { failed = args[slot]->name; return e; }
             }
         }
         else if (*p == '{' || *p == '[')
@@ -350,9 +350,9 @@ inline RequestError DecodeJsonArgs(char* line, const ArgDesc* const* args,
             // and a required one still fails below.
             if (slot >= 0 && strcmp(token, "null") != 0)
             {
-                const RequestError e = Convert(*args[slot], static_cast<size_t>(slot),
+                const CommandResult e = Convert(*args[slot], static_cast<size_t>(slot),
                                                token, strlen(token), out);
-                if (e != RequestError::Ok) { failed = args[slot]->name; return e; }
+                if (e != CommandResult::Ok) { failed = args[slot]->name; return e; }
             }
 
             if (delimiter == '\0' || delimiter == '}') break;
@@ -365,9 +365,9 @@ inline RequestError DecodeJsonArgs(char* line, const ArgDesc* const* args,
         if (args[i]->required && !out.has(static_cast<size_t>(i)))
         {
             failed = args[i]->name;
-            return RequestError::MissingArgument;
+            return CommandResult::MissingArgument;
         }
     }
 
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

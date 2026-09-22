@@ -201,7 +201,7 @@ private:
     void StartProvisioningAp();
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
-    RequestError Cmd_WifiScan(CommandContext& ctx);
+    CommandResult Cmd_WifiScan(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
         { "wifi", "scan", &InvokeCommand<&NetworkManager::Cmd_WifiScan>,

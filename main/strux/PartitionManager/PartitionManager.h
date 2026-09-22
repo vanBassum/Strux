@@ -53,8 +53,8 @@ private:
     int GetPartitions(PartitionInfo* out, int maxCount) const;
 
     // ── Commands (registered with CommandManager in Init) ──
-    RequestError Cmd_UpdateStatus(CommandContext& ctx);
-    RequestError Cmd_Partitions(CommandContext& ctx);
+    CommandResult Cmd_UpdateStatus(CommandContext& ctx);
+    CommandResult Cmd_Partitions(CommandContext& ctx);
     /// Streamed upload: header line + body. `offset` is optional and decides which
     /// of two modes this is:
     ///
@@ -68,14 +68,14 @@ private:
     /// The second mode exists because a single command that runs for tens of seconds
     /// monopolises the transport, which is what the relay's in-flight timeout trips
     /// over. Many short commands need no concurrency support to coexist with others.
-    RequestError Cmd_WritePartition(CommandContext& ctx);
-    RequestError Cmd_DownloadPartition(CommandContext& ctx);
+    CommandResult Cmd_WritePartition(CommandContext& ctx);
+    CommandResult Cmd_DownloadPartition(CommandContext& ctx);
 
     /// Erase a partition whole, so a chunked upload starts from a known state.
-    RequestError Cmd_ClearPartition(CommandContext& ctx);
+    CommandResult Cmd_ClearPartition(CommandContext& ctx);
 
     /// Validate an app image and make it the next boot slot. No-op for data.
-    RequestError Cmd_ActivatePartition(CommandContext& ctx);
+    CommandResult Cmd_ActivatePartition(CommandContext& ctx);
 
     /// Defined in PartitionManager.cpp, beside the handlers and the argument
     /// descriptors they read. A static data member's definition is in the class's

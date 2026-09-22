@@ -96,7 +96,7 @@ void TelemetryManager::SampleVitals()
 // the device never formatted a point, or it formatted them all and could not send
 // one. The counters already separate those; nothing read them. `relayConnected` is
 // here because it is the reason `dropped` climbs in practice.
-RequestError TelemetryManager::Cmd_Stats(CommandContext& ctx)
+CommandResult TelemetryManager::Cmd_Stats(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
     resp.field("enabled", enabled_.Get());
@@ -104,7 +104,7 @@ RequestError TelemetryManager::Cmd_Stats(CommandContext& ctx)
     resp.field("sent", sent_);
     resp.field("dropped", dropped_);
     resp.field("relayConnected", strux_.getRelayManager().IsConnected());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────

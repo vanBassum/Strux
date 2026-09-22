@@ -61,7 +61,7 @@ void AuthManager::Init()
 // parses its own wire format; it is a handler like every other.
 // ──────────────────────────────────────────────────────────────
 
-RequestError AuthManager::Cmd_AuthHello(CommandContext& ctx)
+CommandResult AuthManager::Cmd_AuthHello(CommandContext& ctx)
 {
     // Per CONNECTION, not per device. A transport whose peer is already proven
     // has nothing left to ask for, while a browser socket on a password-protected
@@ -72,10 +72,10 @@ RequestError AuthManager::Cmd_AuthHello(CommandContext& ctx)
 
     auto resp = ctx.reply.object();
     resp.field("authRequired", !alreadyAuthed && auth_.AuthRequired());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError AuthManager::Cmd_AuthLogin(CommandContext& ctx)
+CommandResult AuthManager::Cmd_AuthLogin(CommandContext& ctx)
 {
     const char* password = ctx.arg(passwordArg);
 
@@ -91,12 +91,12 @@ RequestError AuthManager::Cmd_AuthLogin(CommandContext& ctx)
         resp.field("ok", false);
         resp.field("error", "too many failed attempts - wait and try again");
         resp.field("retryAfter", auth_.LockoutRemainingSeconds());
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
     if (result != Authenticator::LoginResult::Ok)
     {
         resp.field("ok", false);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     char key[ResumeTokens::TOKEN_LEN] = {};
@@ -105,10 +105,10 @@ RequestError AuthManager::Cmd_AuthLogin(CommandContext& ctx)
 
     resp.field("ok", true);
     resp.field("key", key);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError AuthManager::Cmd_AuthResume(CommandContext& ctx)
+CommandResult AuthManager::Cmd_AuthResume(CommandContext& ctx)
 {
     const char* key = ctx.arg(keyArg);
 
@@ -117,10 +117,10 @@ RequestError AuthManager::Cmd_AuthResume(CommandContext& ctx)
     if (!auth_.ValidateKey(key))
     {
         resp.field("ok", false);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     if (ctx.connection) ctx.connection->authenticate(key);
     resp.field("ok", true);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

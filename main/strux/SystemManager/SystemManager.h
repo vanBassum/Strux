@@ -77,10 +77,10 @@ private:
     const char* instructions_ = nullptr;
 
     // ── WebSocket commands (registered with CommandManager in Init) ──
-    RequestError Cmd_Ping(CommandContext& ctx);
-    RequestError Cmd_Info(CommandContext& ctx);
-    RequestError Cmd_Reboot(CommandContext& ctx);
-    RequestError Cmd_Describe(CommandContext& ctx);
+    CommandResult Cmd_Ping(CommandContext& ctx);
+    CommandResult Cmd_Info(CommandContext& ctx);
+    CommandResult Cmd_Reboot(CommandContext& ctx);
+    CommandResult Cmd_Describe(CommandContext& ctx);
 
     inline static CommandEntry commands_[] = {
         { "system", "ping",   &InvokeCommand<&SystemManager::Cmd_Ping>,

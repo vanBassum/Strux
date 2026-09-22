@@ -82,8 +82,8 @@ private:
     inline static BoolSetting enabled_{ "led.enabled", "LED Shows Relay Link", true };
 
     // ── Commands ──
-    RequestError Cmd_Get(CommandContext& ctx);
-    RequestError Cmd_Set(CommandContext& ctx);
+    CommandResult Cmd_Get(CommandContext& ctx);
+    CommandResult Cmd_Set(CommandContext& ctx);
 
     /// Defined in LedManager.cpp, beside the handlers and the argument they read.
     /// The bound is the entry count.

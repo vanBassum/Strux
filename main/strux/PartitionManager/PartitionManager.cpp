@@ -204,7 +204,7 @@ int PartitionManager::GetPartitions(PartitionInfo* out, int maxCount) const
 // Status / enumeration commands
 // ──────────────────────────────────────────────────────────────
 
-RequestError PartitionManager::Cmd_UpdateStatus(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_UpdateStatus(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
 
@@ -213,10 +213,10 @@ RequestError PartitionManager::Cmd_UpdateStatus(CommandContext& ctx)
     resp.field("firmware", app->version);
     resp.field("running", GetRunningPartition());
     resp.field("nextSlot", GetNextPartition());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError PartitionManager::Cmd_Partitions(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_Partitions(CommandContext& ctx)
 {
     static constexpr int MAX_PARTITIONS = 16;
     PartitionInfo parts[MAX_PARTITIONS];
@@ -239,7 +239,7 @@ RequestError PartitionManager::Cmd_Partitions(CommandContext& ctx)
         o.field("uploadable", p.uploadable);
         o.field("version",    p.version);
     }
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ RequestError PartitionManager::Cmd_Partitions(CommandContext& ctx)
 // Envelope: {"type":"writePartition","partition":"<label>"}\n<bytes…>
 // ──────────────────────────────────────────────────────────────
 
-RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 {
     // Reply is a stream of newline-free JSON messages, one per chunk: zero or more
     // progress reports {"p":<bytesWritten>} flushed as they happen, then a final
@@ -266,7 +266,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
         auto resp = ctx.reply.object();
         resp.field("ok", false);
         resp.field("error", err);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     // Asked before the loop, not inside it: past this point 0 means end of image,
@@ -277,7 +277,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
         auto resp = ctx.reply.object();
         resp.field("ok", false);
         resp.field("error", "transport cannot stream");
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     const uint8_t* chunk = nullptr;
@@ -290,7 +290,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
             auto resp = ctx.reply.object();
             resp.field("ok", false);
             resp.field("error", "write failed");
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
         if (w.written() - reported >= REPORT_EVERY)
         {
@@ -320,7 +320,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
         auto resp = ctx.reply.object();
         resp.field("ok", false);
         resp.field("error", why);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     // This piece landed, and that is all this command claims. Erasing is `clear`'s
@@ -330,7 +330,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
     resp.field("ok", true);
     resp.field("offset", offset);
     resp.field("size", static_cast<uint32_t>(w.written()));
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -352,7 +352,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 // Converted first because they are new and nothing in the web UI calls them yet, so
 // the format can be proven on hardware without touching the frontend.
 
-RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 {
     const char* label = ctx.arg(partitionArg);
 
@@ -361,13 +361,13 @@ RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
     {
         resp.field("ok", false);
         resp.field("error", err);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
     resp.field("ok", true);
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
 {
     const char* label   = ctx.arg(partitionArg);
     const bool  restart = ctx.arg(restartArg);
@@ -379,7 +379,7 @@ RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
         {
             resp.field("ok", false);
             resp.field("error", err);
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
         resp.field("ok", true);
         resp.field("restarting", restart);
@@ -395,14 +395,14 @@ RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
     }
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
 // ──────────────────────────────────────────────────────────────
 // Partition download — tiny JSON request in, raw bytes out
 // ──────────────────────────────────────────────────────────────
 
-RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
+CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
 {
     const char* label = ctx.arg(partitionArg);
 
@@ -413,7 +413,7 @@ RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
         auto resp = ctx.reply.object();
         resp.field("ok", false);
         resp.field("error", "unknown partition");
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     ESP_LOGI(TAG, "Download partition '%s' (%lu bytes)", label, (unsigned long)p->size);
@@ -423,7 +423,7 @@ RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
         auto resp = ctx.reply.object();
         resp.field("ok", false);
         resp.field("error", "transport cannot stream");
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     // The header record, and the reason this command stopped answering with bare
@@ -451,17 +451,17 @@ RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
         if (dst == nullptr)
         {
             ESP_LOGW(TAG, "Client disconnected during download");
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
 
         size_t n = (p->size - offset < avail) ? (p->size - offset) : avail;
         if (esp_partition_read(p, offset, dst, n) != ESP_OK)
         {
             ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
-            return RequestError::Ok;
+            return CommandResult::Ok;
         }
         ctx.out.commitOutput(n);
         offset += n;
     }
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

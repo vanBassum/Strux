@@ -77,9 +77,9 @@ private:
 
     // ── WebSocket commands (the JSON converter lives HERE, at the
     //    edge — not in the schema/storage core above) ──────────
-    RequestError Cmd_GetSettings(CommandContext& ctx);
-    RequestError Cmd_SetSetting(CommandContext& ctx);
-    RequestError Cmd_SaveSettings(CommandContext& ctx);
+    CommandResult Cmd_GetSettings(CommandContext& ctx);
+    CommandResult Cmd_SetSetting(CommandContext& ctx);
+    CommandResult Cmd_SaveSettings(CommandContext& ctx);
 
     /// Defined in SettingsManager.cpp, beside the handlers and the arguments they
     /// read. The bound is the entry count.

@@ -215,7 +215,7 @@ bool SettingsManager::WriteString(const char* key, const char* v)
 // knows nothing about JSON. Anyone wanting YAML writes their own.
 // ──────────────────────────────────────────────────────────────
 
-RequestError SettingsManager::Cmd_GetSettings(CommandContext& ctx)
+CommandResult SettingsManager::Cmd_GetSettings(CommandContext& ctx)
 {
     auto root     = ctx.reply.object();
     auto settings = root.array("settings");
@@ -242,10 +242,10 @@ RequestError SettingsManager::Cmd_GetSettings(CommandContext& ctx)
         }
         }
     }   // each `o` closes at end of iteration; `settings` and `root` at return
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
+CommandResult SettingsManager::Cmd_SetSetting(CommandContext& ctx)
 {
     const char* key   = ctx.arg(keyArg);
     const char* value = ctx.arg(valueArg);
@@ -278,19 +278,19 @@ RequestError SettingsManager::Cmd_SetSetting(CommandContext& ctx)
         }
 
         resp.field("ok", ok);
-        return RequestError::Ok;
+        return CommandResult::Ok;
     }
 
     // An unrecognised setting key is MEANING, not form — the framework has no idea
     // which keys exist. So it is a reply, not a refusal.
     resp.field("ok", false);
     resp.field("error", "unknown key");
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }
 
-RequestError SettingsManager::Cmd_SaveSettings(CommandContext& ctx)
+CommandResult SettingsManager::Cmd_SaveSettings(CommandContext& ctx)
 {
     auto resp = ctx.reply.object();
     resp.field("ok", Save());
-    return RequestError::Ok;
+    return CommandResult::Ok;
 }

@@ -28,7 +28,7 @@ struct CommandEntry
     // into a tree walk for nothing.
     const char* category;
     const char* name;
-    RequestError (*handler)(void* ctx, CommandContext& c);
+    CommandResult (*handler)(void* ctx, CommandContext& c);
 
     /// One line saying what this command DOES, in the vocabulary of whoever calls it.
     ///
@@ -79,7 +79,7 @@ struct CommandEntry
 // Handlers are ordinary functions with no ctx in sight — either a
 // (usually private, non-static) member of the owning manager:
 //
-//     RequestError Cmd_Ping(CommandContext& ctx);
+//     CommandResult Cmd_Ping(CommandContext& ctx);
 //     { "system", "ping", &InvokeCommand<&SystemManager::Cmd_Ping> },
 //
 // or a free/static function (e.g. quick hacking in main.cpp —
@@ -99,11 +99,11 @@ struct CommandEntry
 // one chain hold commands of many classes) but it lives only here.
 // ──────────────────────────────────────────────────────────────
 template <typename T> struct CommandOwner;
-template <typename C> struct CommandOwner<RequestError (C::*)(CommandContext&)>       { using type = C; };
-template <typename C> struct CommandOwner<RequestError (C::*)(CommandContext&) const> { using type = const C; };
+template <typename C> struct CommandOwner<CommandResult (C::*)(CommandContext&)>       { using type = C; };
+template <typename C> struct CommandOwner<CommandResult (C::*)(CommandContext&) const> { using type = const C; };
 
 template <auto Handler>
-RequestError InvokeCommand(void* ctx, CommandContext& c)
+CommandResult InvokeCommand(void* ctx, CommandContext& c)
 {
     if constexpr (std::is_member_function_pointer_v<decltype(Handler)>)
     {

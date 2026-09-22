@@ -88,7 +88,7 @@ namespace protocol
     /// Run one opened channel: name it, dispatch it, close or refuse the reply.
     ///
     /// `dispatcher` is duck-typed on
-    /// `RequestError Execute(category, command, Stream&, Stream&, const char**)`
+    /// `CommandResult Execute(category, command, Stream&, Stream&, const char**)`
     /// — a template rather than an interface so the protocol layer never depends
     /// upward on the dispatcher, and no callback inversion comes back.
     /// `gate` is duck-typed on `bool Allows(const char* category) const` plus
@@ -133,15 +133,15 @@ namespace protocol
         // in == out: the handler reads its arguments and any body from the same
         // channel it writes its reply to.
         const char* failedArg = nullptr;
-        const RequestError err =
+        const CommandResult err =
             dispatcher.Execute(category, command, channel, channel, &gate, &failedArg);
-        if (err != RequestError::Ok)
+        if (err != CommandResult::Ok)
         {
             // Form failures refuse the request. REJECT ends the channel like FINAL
             // does, so this composes with anything the handler already wrote — a
             // refusal can always be last.
             char buf[96];
-            channel.reject(DescribeRequestError(err, failedArg, buf, sizeof(buf)));
+            channel.reject(DescribeCommandResult(err, failedArg, buf, sizeof(buf)));
             return;
         }
 

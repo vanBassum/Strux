@@ -27,7 +27,7 @@ namespace protocol
 
 // Everything a command handler gets: its arguments, its request body, its reply.
 //
-//     RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
+//     CommandResult PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 //     {
 //         const char* label = ctx.arg(partitionArg);
 //         ...
@@ -123,4 +123,4 @@ private:
 
 /// Human-readable form of a request failure, for the REJECT payload. Written by the
 /// framework — handlers never compose error text.
-const char* DescribeRequestError(RequestError e, const char* arg, char* buf, size_t cap);
+const char* DescribeCommandResult(CommandResult e, const char* arg, char* buf, size_t cap);

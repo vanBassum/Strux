@@ -7,7 +7,7 @@
 // request side: a handler names the SHAPE of what it is writing and never names the
 // wire format.
 //
-//     RequestError Cmd_Info(CommandContext& ctx)
+//     CommandResult Cmd_Info(CommandContext& ctx)
 //     {
 //         auto resp = ctx.reply.object();
 //         resp.field("name", deviceName);

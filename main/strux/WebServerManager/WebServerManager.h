@@ -58,7 +58,7 @@ private:
     // Reply is a header line then the raw bytes:
     //
     //   {"ok":true,"status":200,"contentType":"...","contentEncoding":"gzip"}\n<bytes>
-    RequestError Cmd_GetWebFile(CommandContext& ctx);
+    CommandResult Cmd_GetWebFile(CommandContext& ctx);
 
     /// Defined in WebServerManager.cpp, beside the handler and the argument it
     /// reads. The bound is the entry count.
