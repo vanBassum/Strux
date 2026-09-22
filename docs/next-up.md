@@ -38,7 +38,10 @@ feed both work. What is left needs eyes and a second machine:
 - **A browser at every width, now in both themes** — the sidebar surviving, and the
   redesigned Settings page (two-column card grid, category chip row) laying out as
   intended. The sidebar header's new system/light/dark toggle is the first thing ever to
-  put the `.dark` tokens in play, so every page needs one dark look.
+  put the `.dark` tokens in play, so every page needs one dark look. The new Commands
+  page joins this: its four reply shapes are proven on the wire against the bench devkit
+  (a plain record, a 7.9 KB record split over two frames, an `ok:false` refusal, and a
+  declared `text/html` body), but nothing has looked at how it renders them.
 - **The relay path** — `relay.url` on the bench devkit points at
   `ws://192.168.50.109:8080/device`, which refuses the connection, so the relay has
   never served this build. (A *second* C3, `esp32-50787d83db6c`, has been driven through

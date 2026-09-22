@@ -1,5 +1,11 @@
 import { useEffect } from "react"
-import { LightbulbIcon, TerminalIcon, SettingsIcon, DownloadIcon } from "lucide-react"
+import {
+  LightbulbIcon,
+  TerminalIcon,
+  SquareTerminalIcon,
+  SettingsIcon,
+  DownloadIcon,
+} from "lucide-react"
 import {
   Sidebar,
   SidebarContent,
@@ -32,6 +38,7 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 const navItems = [
   { title: "LED", icon: LightbulbIcon, page: "home" as const },
   { title: "Console", icon: TerminalIcon, page: "console" as const },
+  { title: "Commands", icon: SquareTerminalIcon, page: "commands" as const },
   { title: "Settings", icon: SettingsIcon, page: "settings" as const },
   { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },
 ]

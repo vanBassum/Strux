@@ -1,7 +1,7 @@
 // Singleton backend service — all communication over a single WebSocket.
 
 import { DEV_HOST } from "@/config"
-import { ReplyReader } from "./reply"
+import { ReplyReader, type ReplyResult } from "./reply"
 
 const TOKEN_KEY = "device.token"
 
@@ -24,6 +24,10 @@ interface PendingRequest {
   // The caller expects a declared body (a header record with contentType, then
   // bytes). Resolves with { header, body } instead of the parsed record.
   wantsBody?: boolean
+  // The caller wants the reader's result with nothing read into it: every
+  // record, the result, and a body if one was declared. `wantsBody` is one
+  // interpretation of that; this is the absence of any.
+  wantsRaw?: boolean
   // Cumulative BODY bytes, for progress.
   onData?: (received: number) => void
 }
@@ -461,6 +465,7 @@ class BackendService {
       timeoutMs?: number
       onMessage?: (msg: Record<string, unknown>) => void
       wantsBody?: boolean
+      wantsRaw?: boolean
       onData?: (received: number) => void
     } = {},
   ): Promise<T> {
@@ -480,6 +485,7 @@ class BackendService {
         reader: new ReplyReader(),
         onMessage: opts.onMessage,
         wantsBody: opts.wantsBody,
+        wantsRaw: opts.wantsRaw,
         onData: opts.onData,
       })
     })
@@ -503,6 +509,34 @@ class BackendService {
     opts: SendOptions<M> = {},
   ): Promise<T> {
     return this.enqueue(() => this.sendUnqueued<T, M>(type, params, opts))
+  }
+
+  /** Run an envelope the caller composed, and hand back the reply exactly as it
+   *  arrived: every record, the result, and a declared body if there was one.
+   *
+   *  The typed methods below all answer a question this file knows the shape of.
+   *  This one answers a question only the person typing it knows, so it must not
+   *  interpret — a reply it cannot parse is still the device's answer and still
+   *  has to be shown. It is the command workbench's whole backend.
+   *
+   *  `timeoutMs` bounds SILENCE, as everywhere else. It defaults higher than
+   *  `send` does because anything may be typed here, including the commands that
+   *  write flash. */
+  async execute(
+    envelope: Record<string, unknown>,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<ReplyResult> {
+    return this.enqueue(async () => {
+      await this.ensureConnected()
+      const session = this.allocSession()
+      const reply = this.awaitReply<ReplyResult>(session, {
+        timeoutMs: opts.timeoutMs ?? 30000,
+        wantsRaw: true,
+      })
+      const request = new TextEncoder().encode(JSON.stringify(envelope) + "\n")
+      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, request)
+      return reply
+    })
   }
 
   /** One command, WITHOUT taking a queue slot. Only for a caller that already
@@ -615,6 +649,11 @@ class BackendService {
     this.pending.delete(session)
     clearTimeout(req.timer)
     const reply = req.reader.end()
+
+    if (req.wantsRaw) {
+      req.resolve(reply)
+      return
+    }
 
     if (req.wantsBody) {
       if (!reply.body || !reply.header) {
