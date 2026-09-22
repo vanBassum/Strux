@@ -27,7 +27,7 @@ public:
             const ArgSpec& s = specs[i];
             auto arg = args_.object();
             arg.field("name", s.name);
-            arg.field("type", TypeName(s.type));
+            arg.field("type", ArgTypeName(s.type));
             arg.field("required", s.required);
             // The declared capacity, minus the terminator: the length at which this
             // argument is refused, which is the number a caller actually needs.
@@ -43,16 +43,4 @@ public:
 
 private:
     ReplyArray& args_;
-
-    static const char* TypeName(ArgType t)
-    {
-        switch (t)   // no default: a new ArgType must be handled here
-        {
-        case ArgType::String: return "string";
-        case ArgType::UInt32: return "uint32";
-        case ArgType::Int32:  return "int32";
-        case ArgType::Bool:   return "bool";
-        }
-        return "unknown";
-    }
 };

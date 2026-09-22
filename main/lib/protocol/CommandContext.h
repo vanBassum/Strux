@@ -2,6 +2,7 @@
 
 #include "Stream.h"
 #include "ReplyWriter.h"
+#include "CommandArgs.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -55,25 +56,11 @@ namespace protocol
 // number. The handler validates MEANING — is that address inside this partition.
 // Form failures become a REJECT; meaning goes in the reply, where it can carry data.
 
-/// Ways a REQUEST can be unusable. Closed set, owned by the framework — anything a
-/// command author wants to add is meaning, and belongs in the reply.
-enum class RequestError : uint8_t
-{
-    Ok = 0,
-    UnknownCommand,
-    MissingArgument,
-    MalformedNumber,
-    ArgumentTooLong,
-    MalformedRequest,
+// RequestError, ArgType, Presence, ArgDesc, CommandArg and the JSON decoder live in
+// CommandArgs.h -- they name no layer and pull in nothing, so they are verified on the
+// host. What stays here is the handler's view of a request: its arguments, its body,
+// its reply.
 
-    /// Not a failure, and the one value a wire reader never produces: `help` swaps in
-    /// a reader that prints the declarations instead of filling them, and this is how
-    /// it stops the handler at its own RETURN_IF_ERROR before the body runs. It never
-    /// escapes the help command, which turns it back into Ok.
-    Described,
-};
-
-enum class ArgType : uint8_t { String, UInt32, Int32, Bool };
 
 /// One declared argument: where to put it and whether it may be absent. Type-erased
 /// on purpose — the variadic layer builds an array of these and hands it to one

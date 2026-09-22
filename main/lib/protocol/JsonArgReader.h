@@ -119,6 +119,11 @@ private:
             *static_cast<bool*>(s.dst) =
                 (strcmp(value, "true") == 0 || strcmp(value, "1") == 0);
             return RequestError::Ok;
+
+        case ArgType::Float:
+            // Unreachable: no ArgSpec factory produces one. A float argument is only
+            // declarable statically (CommandArg<float>), which this reader never sees.
+            return RequestError::MalformedRequest;
         }
         return RequestError::MalformedRequest;
     }
