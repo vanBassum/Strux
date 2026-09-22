@@ -319,9 +319,8 @@ CommandResult PartitionManager::Cmd_WritePartition(CommandContext& ctx)
             {
                 auto progress = ctx.reply.object();
                 progress.field("p", static_cast<uint32_t>(w.written()));
-            }   // closed before the separator, or the newline lands inside it
-            protocol::EndRecord(ctx.out);
-            ctx.out.flush();                       // push it now, not at FINAL
+            }
+            ctx.reply.flush();   // end this record and push it now, not at FINAL
             reported = w.written();
         }
     }
@@ -440,27 +439,22 @@ CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
 
     ESP_LOGI(TAG, "Download partition '%s' (%lu bytes)", label, (unsigned long)p->size);
 
-    if (!ctx.out.canLend())
-    {
-        auto resp = ctx.reply.object();
-        resp.field("ok", false);
-        resp.field("error", "transport cannot stream");
-        return CommandResult::Ok;
-    }
-
     // The header record, and the reason this command stopped answering with bare
     // bytes. Every refusal above is an ordinary record, so a reader that got only
     // bytes had to GUESS which it was holding -- the frontend did it by testing
     // whether a short reply began with {"ok":false, which a partition is entitled
     // to contain. Declaring the body removes the guess: one record, then the size
     // so a truncated read is detectable, then the bytes.
+    auto head = ctx.reply.object();
+    head.field("ok", true);
+    head.field("size", static_cast<uint32_t>(p->size));
+    Stream& body = head.body(protocol::CONTENT_TYPE_OCTETS);
+
+    if (!body.canLend())
     {
-        auto head = ctx.reply.object();
-        head.field("ok", true);
-        head.field("size", static_cast<uint32_t>(p->size));
-        head.field("contentType", protocol::CONTENT_TYPE_OCTETS);
+        ESP_LOGE(TAG, "transport cannot stream a partition body");
+        return CommandResult::Ok;
     }
-    protocol::EndRecord(ctx.out);
 
     // Read flash straight into the reply frame the transport is about to send. The
     // run is one chunk's worth of payload, not a size of ours — which is why there
@@ -469,7 +463,7 @@ CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
     while (offset < p->size)
     {
         size_t avail = 0;
-        uint8_t* dst = ctx.out.lendOutput(avail);
+        uint8_t* dst = body.lendOutput(avail);
         if (dst == nullptr)
         {
             ESP_LOGW(TAG, "Client disconnected during download");
@@ -482,7 +476,7 @@ CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
             ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
             return CommandResult::Ok;
         }
-        ctx.out.commitOutput(n);
+        body.commitOutput(n);
         offset += n;
     }
     return CommandResult::Ok;

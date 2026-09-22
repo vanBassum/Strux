@@ -1,5 +1,4 @@
 #include "WebServerManager.h"
-#include "ReplyBody.h"
 #include "ConsoleManager.h"
 #include "CommandManager.h"
 #include "AuthManager.h"
@@ -153,36 +152,39 @@ CommandResult WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
     StaticFileHandler::Resolved file;
     const bool found = StaticFileHandler::Resolve(path, file);
 
-    // The header is a record; the body is raw bytes after it. The scope must therefore
-    // close before the newline that divides them, hence the braces — the reply is not
-    // one document, and ctx.out stays reachable alongside ctx.reply for exactly this.
     if (!found)
     {
         // A real 404 — SPA fallback is the asking route layer's decision, not
         // ours (see StaticFileHandler::Resolve).
+        //
+        // The record is ENDED even though no body follows, because this command's
+        // reply is a header line and then a file, and a 404's file is empty rather
+        // than absent. The relay's asset proxy reads it that way and refuses a reply
+        // with no header line at all, so the separator is part of the contract here
+        // rather than a separator between two records.
         {
             auto head = ctx.reply.object();
             head.field("ok", true);
             head.field("status", static_cast<uint32_t>(404));
         }
-        protocol::EndRecord(ctx.out);
+        ctx.reply.flush();
         return CommandResult::Ok;   // the request was fine; the file simply is not there
     }
 
-    {
-        auto head = ctx.reply.object();
-        head.field("ok", true);
-        head.field("status", static_cast<uint32_t>(200));
-        head.field("contentType", file.contentType);
-        if (file.gzipped)
-            head.field("contentEncoding", "gzip");
-    }
-    protocol::EndRecord(ctx.out);
+    auto head = ctx.reply.object();
+    head.field("ok", true);
+    head.field("status", static_cast<uint32_t>(200));
+    if (file.gzipped)
+        head.field("contentEncoding", "gzip");
+
+    // Declaring the body seals the header record and hands back the stream; the
+    // separator between them is the writer's business, not this handler's.
+    Stream& body = head.body(file.contentType);
 
     // One write of the whole file, straight from flash-mapped rodata: Channel::write
     // splits it across the channel window itself, so a 200 KB bundle still needs no
     // 200 KB buffer here or on the transport — and no read buffer at all now that
     // there is no file to read.
-    ctx.out.write(file.data, file.size);
+    body.write(file.data, file.size);
     return CommandResult::Ok;
 }

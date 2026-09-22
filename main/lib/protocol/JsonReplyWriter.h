@@ -28,6 +28,12 @@ protected:
 
     void key(const char* name) override { WriteEscaped(name); out_.write(":", 1); }
 
+    // A record it produced can never contain a raw newline: strings are escaped and
+    // every control character below 0x20 is dropped. See ReplyBody.h.
+    void endRecord() override { out_.write("\n", 1); }
+
+    Stream& stream() override { return out_; }
+
     void value(const char* v) override { WriteEscaped(v); }
     void value(bool v)        override { WriteRaw(v ? "true" : "false"); }
 

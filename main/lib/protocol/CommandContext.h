@@ -49,21 +49,21 @@ public:
     /// `args` is the command's declaration list, null-terminated; `values` is what a
     /// decoder made of the request against it. Both come from the dispatcher and
     /// outlive the handler.
-    CommandContext(ReplyWriter& writer, Stream& request, Stream& response,
+    CommandContext(ReplyWriter& writer, Stream& request,
                    const ArgDesc* const* args, const ArgValues& values,
                    ConnectionAuth* connection = nullptr)
-        : in(request), out(response), reply(writer),
+        : in(request), reply(writer),
           connection(connection), args_(args), values_(values) {}
 
     CommandContext(const CommandContext&) = delete;
     CommandContext& operator=(const CommandContext&) = delete;
 
     Stream& in;    ///< request body, the stream already positioned there
-    Stream& out;   ///< reply, as raw bytes
 
-    /// The reply as structure: `auto resp = ctx.reply.object();`. Writes through to
-    /// `out` in the connection's format, so a handler need not name one. Raw writes to
-    /// `out` remain legal alongside it — a header record then a file body, say.
+    /// The reply: `auto resp = ctx.reply.object();`. Writes through in the
+    /// connection's format, so a handler need not name one. It is the ONLY way out —
+    /// raw bytes are reached through `resp.body("...")`, which declares what they are
+    /// first, so no handler can write to the wire without saying what it is writing.
     ReplyWriter& reply;
 
     /// Auth state of the connection this arrived on; null when the transport gates

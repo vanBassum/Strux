@@ -1,9 +1,12 @@
 #pragma once
 
-#include "Stream.h"
-
 // How a reply is shaped, so that a caller can read one WITHOUT knowing which
 // command it called.
+//
+// This file is the CONVENTION. What implements it is ReplyWriter: a record ends
+// when its root scope closes, the separator is written before whatever follows, and
+// ReplyObject::body declares a media type and hands back the stream. No handler
+// writes a newline.
 //
 // ── The convention ───────────────────────────────────────────────────────────
 //
@@ -52,13 +55,6 @@
 // already carries for free.
 namespace protocol
 {
-    /// End one record. The next byte written starts the next record, or the body
-    /// when this record declared a contentType.
-    ///
-    /// Call it after the reply scope has CLOSED -- a scope writes to ctx.out on
-    /// every field, so a separator written while one is open lands inside it.
-    inline void EndRecord(Stream& out) { out.write("\n", 1); }
-
     /// What to declare for bytes with no better name: a flash image, an unknown
     /// blob. A caller sees "there is a body and it is not text", which is the
     /// distinction it actually needs.

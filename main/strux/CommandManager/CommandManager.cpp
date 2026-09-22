@@ -54,7 +54,7 @@ CommandResult CommandManager::Execute(EnvelopeLine& envelope, Stream& in, Stream
     }
 
     JsonReplyWriter writer(out);
-    CommandContext ctx(writer, in, out, e->args, values, connection);
+    CommandContext ctx(writer, in, e->args, values, connection);
     return e->handler(e->ctx, ctx);
 }
 
