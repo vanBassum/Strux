@@ -9,26 +9,34 @@ Last updated 2026-09-22.
 
 ## Now
 
-**Every command declares its arguments, and `help` no longer executes anything.** A
+**Every command declares its arguments, and nothing is executed to describe it.** A
 command's arguments are `constexpr CommandArg<T>` descriptors named by its
 `CommandEntry`; the framework decodes them before the handler runs and the handler
-reads them with `ctx.arg()` / `ctx.has()`. All 24 commands are converted, so
-`DescribeArguments` reads metadata and never re-dispatches -- `system reboot` is now
-describable without being at risk of executing. `help describe` for the whole registry
-is byte-identical to the capture taken before the migration, checked on the bench
-devkit.
+reads them with `ctx.arg()` / `ctx.has()`. All 24 commands are converted and the old
+mechanism is deleted -- `DescribeArgReader`, `ArgReader`, `ArgSpec`, `readArgs`,
+`RETURN_IF_ERROR`, `RequestError::Described`. `JsonArgReader` is now `EnvelopeLine`,
+which consumes the envelope line (leaving the stream at the body) and keeps it mutable
+for the decoder, and does nothing else. `help describe` for the whole registry is
+byte-identical to the capture taken before any of it, checked on the bench devkit.
 
-**Next: delete the old mechanism**, which is standing unreachable and must go as its
-own reviewable change -- `DescribeArgReader`, `ArgReader`, `ArgSpec` with its eight
-Required/Optional factories, `JsonArgReader::read`/`fill` (NOT the class: its
-constructor still consumes the envelope line), `CommandContext::readArgs`,
-`RETURN_IF_ERROR` and `RequestError::Described`. Then, each on its own:
+Next, each on its own and in this order:
 
-1. rework `RequestError` into `CommandResult` -- `Described` is what forced the name,
-   and #43 wants a result meaning "the reply is incomplete";
-2. reply framing -- `reply.body(contentType)` sealing the structured part, so no
-   handler writes a newline or touches `ctx.out`;
-3. collapse `category` + `name` into one identifier.
+1. **Rename `RequestError` to `CommandResult`.** The rename only -- `Described` is what
+   made the old name wrong, and it is gone. Do not collapse or add values yet.
+2. **Reply framing.** `reply.body(contentType)` seals the structured part and returns
+   the existing `Stream`, so no handler writes a newline or touches `ctx.out`; progress
+   stays ordinary multiple records, with an explicit flush where one is wanted.
+3. **Replace the per-manager `commands_[N]` arrays with individually named
+   `CommandEntry` objects**, registered explicitly by the owning manager the way
+   `SettingsManager::Register({ &a, &b })` already registers settings. No
+   `CommandTable` abstraction, no static or self-registration magic.
+4. **Collapse `category` + `name` into the single identity the wire already carries.**
+   Grouping (for `help`) and permission grouping (for `AuthGate`) are separate
+   questions from identity and stay where they are useful.
+
+Loose end for step 2: `protocol::MAX_ENVELOPE` still lives in `CommandContext.h`, which
+after the deletion has nothing else to do with parsing. It belongs beside
+`EnvelopeLine`; moving it was left out of the deletion commit as unrelated churn.
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the
