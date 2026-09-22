@@ -85,7 +85,7 @@ private:
     CommandResult Cmd_Get(CommandContext& ctx);
     CommandResult Cmd_Set(CommandContext& ctx);
 
-    /// Defined in LedManager.cpp, beside the handlers and the argument they read.
-    /// The bound is the entry count.
-    static CommandEntry commands_[2];
+    // Defined in LedManager.cpp, beside the handlers and the argument they read.
+    static CommandEntry getCommand_;
+    static CommandEntry setCommand_;
 };

@@ -17,6 +17,30 @@ SystemManager::SystemManager(StruxProvider& strux)
 {
 }
 
+CommandEntry SystemManager::pingCommand_{
+    "system", "ping", &InvokeCommand<&SystemManager::Cmd_Ping>,
+    "Check the device is answering. Takes nothing, returns {\"pong\":true}."
+};
+
+CommandEntry SystemManager::infoCommand_{
+    "system", "info", &InvokeCommand<&SystemManager::Cmd_Info>,
+    "Report this device's runtime state: name, firmware build, chip, clock, IP "
+    "address, free heap and the device's own clock."
+};
+
+CommandEntry SystemManager::rebootCommand_{
+    "system", "reboot", &InvokeCommand<&SystemManager::Cmd_Reboot>,
+    "Restart the device. The reply is written first, then the device restarts "
+    "about half a second later and every connection drops."
+};
+
+CommandEntry SystemManager::describeCommand_{
+    "system", "describe", &InvokeCommand<&SystemManager::Cmd_Describe>,
+    "What this device IS: its name, firmware, one-line description and its "
+    "full instructions - how it is meant to be driven. Pair it with "
+    "'help describe', which is the same question about the commands."
+};
+
 void SystemManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -27,7 +51,12 @@ void SystemManager::Init()
     }
 
     strux_.getSettingsManager().Register({ &name_ });
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, {
+        &pingCommand_,
+        &infoCommand_,
+        &rebootCommand_,
+        &describeCommand_,
+    });
 
     // Logged rather than only served by `system info`, because a fork changing the
     // power settings is flashing a board over serial when it wants to know whether

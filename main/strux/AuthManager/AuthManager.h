@@ -73,7 +73,8 @@ private:
     /// Resume with a key minted earlier.
     CommandResult Cmd_AuthResume(CommandContext& ctx);
 
-    /// Defined in AuthManager.cpp, beside the handlers and the arguments they
-    /// read. The bound is the entry count.
-    static CommandEntry commands_[3];
+    // Defined in AuthManager.cpp, beside the handlers and the arguments they read.
+    static CommandEntry helloCommand_;
+    static CommandEntry loginCommand_;
+    static CommandEntry resumeCommand_;
 };

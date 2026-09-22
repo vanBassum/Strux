@@ -20,7 +20,7 @@ void CommandManager::Init()
         return;
     }
 
-    Register(this, commands_);
+    Register(this, { &listCommand_, &describeCommand_ });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");
@@ -111,15 +111,18 @@ constexpr CommandArg<const char*> describeCategoryArg{
 
 } // namespace
 
-CommandEntry CommandManager::commands_[2] = {
-    { "help", "list",     &InvokeCommand<&CommandManager::Cmd_Help>,
-      "List the device's command categories, one category's commands, or one "
-      "command's arguments.",
-      { &listCategoryArg, &listCommandArg } },
-    { "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
-      "Describe every command this firmware offers - category, name, description "
-      "and full argument declarations - in one reply.",
-      { &describeCategoryArg } },
+CommandEntry CommandManager::listCommand_{
+    "help", "list", &InvokeCommand<&CommandManager::Cmd_Help>,
+    "List the device's command categories, one category's commands, or one "
+    "command's arguments.",
+    { &listCategoryArg, &listCommandArg }
+};
+
+CommandEntry CommandManager::describeCommand_{
+    "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
+    "Describe every command this firmware offers - category, name, description "
+    "and full argument declarations - in one reply.",
+    { &describeCategoryArg }
 };
 
 CommandResult CommandManager::Cmd_Help(CommandContext& ctx)

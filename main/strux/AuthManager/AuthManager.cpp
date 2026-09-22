@@ -24,19 +24,25 @@ constexpr CommandArg<const char*> keyArg{
 
 } // namespace
 
-CommandEntry AuthManager::commands_[3] = {
-    { "auth", "hello",  &InvokeCommand<&AuthManager::Cmd_AuthHello>,
-      "Ask whether this connection has to log in before anything else will be "
-      "answered. With no web password set - the default - it never does." },
-    { "auth", "login",  &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
-      "Authenticate this connection with the device's web password. On success "
-      "the reply carries a channel key that 'auth resume' takes. Failed attempts "
-      "are rate limited, and a refusal says which of the two it was.",
-      { &passwordArg } },
-    { "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
-      "Re-authenticate a reconnected client with the channel key a previous "
-      "'auth login' handed out, instead of the password again.",
-      { &keyArg } },
+CommandEntry AuthManager::helloCommand_{
+    "auth", "hello", &InvokeCommand<&AuthManager::Cmd_AuthHello>,
+    "Ask whether this connection has to log in before anything else will be "
+    "answered. With no web password set - the default - it never does."
+};
+
+CommandEntry AuthManager::loginCommand_{
+    "auth", "login", &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
+    "Authenticate this connection with the device's web password. On success "
+    "the reply carries a channel key that 'auth resume' takes. Failed attempts "
+    "are rate limited, and a refusal says which of the two it was.",
+    { &passwordArg }
+};
+
+CommandEntry AuthManager::resumeCommand_{
+    "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
+    "Re-authenticate a reconnected client with the channel key a previous "
+    "'auth login' handed out, instead of the password again.",
+    { &keyArg }
 };
 
 void AuthManager::Init()
@@ -50,7 +56,11 @@ void AuthManager::Init()
 
     strux_.getSettingsManager().Register({ &webPassword_ });
     auth_.Init();   // snapshot the stored password (after registration)
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, {
+        &helloCommand_,
+        &loginCommand_,
+        &resumeCommand_,
+    });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");

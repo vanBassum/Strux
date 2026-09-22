@@ -114,9 +114,6 @@ private:
     // ── WebSocket commands (registered with CommandManager in Init) ──
     CommandResult Cmd_GetLogs(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "log", "list", &InvokeCommand<&ConsoleManager::Cmd_GetLogs>,
-          "Return the device's in-memory log ring - everything it has printed since "
-          "boot, oldest first. The ring is fixed size, so older lines are gone." },
-    };
+    // Defined in ConsoleManager.cpp, beside the handler.
+    static CommandEntry logListCommand_;
 };

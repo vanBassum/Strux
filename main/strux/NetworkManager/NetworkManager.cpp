@@ -15,6 +15,12 @@ NetworkManager::NetworkManager(StruxProvider& strux)
 {
 }
 
+CommandEntry NetworkManager::wifiScanCommand_{
+    "wifi", "scan", &InvokeCommand<&NetworkManager::Cmd_WifiScan>,
+    "Scan for WiFi networks in range and report each one's SSID and signal "
+    "strength. Takes a few seconds and briefly disturbs the connection."
+};
+
 void NetworkManager::Init()
 {
     auto initAttempt = initState.TryBeginInit();
@@ -79,7 +85,7 @@ void NetworkManager::Init()
     connectTimer_.Init("net_cycle", pdMS_TO_TICKS(StaConnectTimeoutMs), false);
     connectTimer_.SetHandler([this]() { OnCycleTimer(); });
 
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, { &wifiScanCommand_ });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized");

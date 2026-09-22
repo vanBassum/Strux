@@ -81,7 +81,8 @@ private:
     CommandResult Cmd_SetSetting(CommandContext& ctx);
     CommandResult Cmd_SaveSettings(CommandContext& ctx);
 
-    /// Defined in SettingsManager.cpp, beside the handlers and the arguments they
-    /// read. The bound is the entry count.
-    static CommandEntry commands_[3];
+    // Defined in SettingsManager.cpp, beside the handlers and the arguments they read.
+    static CommandEntry listCommand_;
+    static CommandEntry setCommand_;
+    static CommandEntry saveCommand_;
 };

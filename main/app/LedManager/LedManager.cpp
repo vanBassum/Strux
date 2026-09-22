@@ -25,7 +25,7 @@ void LedManager::Init()
     // Strux was edited to make these two lines work.
     StruxProvider& strux = app_.getStrux();
     strux.getSettingsManager().Register({ &enabled_ });
-    strux.getCommandManager().Register(this, commands_);
+    strux.getCommandManager().Register(this, { &getCommand_, &setCommand_ });
 
     timer_.SetHandler([this] { OnTick(); });
     timer_.Init("led", pdMS_TO_TICKS(POLL_MS));
@@ -72,14 +72,17 @@ constexpr CommandArg<bool> enabledArg{
 
 } // namespace
 
-CommandEntry LedManager::commands_[2] = {
-    { "led", "get", &InvokeCommand<&LedManager::Cmd_Get>,
-      "Report the indicator: whether it is enabled, whether the relay link is up, "
-      "and whether the LED is lit right now." },
-    { "led", "set", &InvokeCommand<&LedManager::Cmd_Set>,
-      "Turn the relay-link indicator on or off. Persisted, so it survives a "
-      "reboot. Omitting 'enabled' leaves it as it is and just reports the state.",
-      { &enabledArg } },
+CommandEntry LedManager::getCommand_{
+    "led", "get", &InvokeCommand<&LedManager::Cmd_Get>,
+    "Report the indicator: whether it is enabled, whether the relay link is up, "
+    "and whether the LED is lit right now."
+};
+
+CommandEntry LedManager::setCommand_{
+    "led", "set", &InvokeCommand<&LedManager::Cmd_Set>,
+    "Turn the relay-link indicator on or off. Persisted, so it survives a "
+    "reboot. Omitting 'enabled' leaves it as it is and just reports the state.",
+    { &enabledArg }
 };
 
 CommandResult LedManager::Cmd_Get(CommandContext& ctx)

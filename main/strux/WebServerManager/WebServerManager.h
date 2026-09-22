@@ -60,7 +60,6 @@ private:
     //   {"ok":true,"status":200,"contentType":"...","contentEncoding":"gzip"}\n<bytes>
     CommandResult Cmd_GetWebFile(CommandContext& ctx);
 
-    /// Defined in WebServerManager.cpp, beside the handler and the argument it
-    /// reads. The bound is the entry count.
-    static CommandEntry commands_[1];
+    // Defined in WebServerManager.cpp, beside the handler and the argument it reads.
+    static CommandEntry readCommand_;
 };

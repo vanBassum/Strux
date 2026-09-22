@@ -77,11 +77,14 @@ private:
     /// Validate an app image and make it the next boot slot. No-op for data.
     CommandResult Cmd_ActivatePartition(CommandContext& ctx);
 
-    /// Defined in PartitionManager.cpp, beside the handlers and the argument
-    /// descriptors they read. A static data member's definition is in the class's
-    /// scope, so the table may name these private handlers from there; keeping it out
-    /// of the header is what keeps the argument metadata next to the code it
-    /// describes. The bound is the entry count -- getting it wrong is a compile error
-    /// at the definition.
-    static CommandEntry commands_[6];
+    // Defined in PartitionManager.cpp, beside the handlers and the argument
+    // descriptors they read. A static data member's DEFINITION is in the class's
+    // scope, so it may name these private handlers from namespace scope in the .cpp;
+    // that is what keeps every command's metadata next to the code it describes.
+    static CommandEntry statusCommand_;
+    static CommandEntry listCommand_;
+    static CommandEntry writeCommand_;
+    static CommandEntry clearCommand_;
+    static CommandEntry activateCommand_;
+    static CommandEntry readCommand_;
 };

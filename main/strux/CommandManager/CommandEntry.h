@@ -9,11 +9,10 @@ class Stream;
 // ──────────────────────────────────────────────────────────────
 // One command in the CommandManager registry.
 //
-// Entries are the links of an intrusive chain. Owners declare them
-// as an `inline static CommandEntry commands_[]` class member
-// (static storage duration) and hand the array to
-// CommandManager::Register(), which stamps ctx and links them.
-// Owners never touch ctx/next/registered.
+// Entries are the links of an intrusive chain. A manager declares one
+// named object per command (static storage duration) and hands the ones
+// it wants registered to CommandManager::Register(), which stamps ctx
+// and links them. Owners never touch ctx/next/registered.
 //
 // Handlers are plain function pointers — no heap, no std::function.
 // The usual shape is a static member "trampoline" that casts ctx

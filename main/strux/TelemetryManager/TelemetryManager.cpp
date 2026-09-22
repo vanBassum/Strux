@@ -19,6 +19,10 @@ TelemetryManager::TelemetryManager(StruxProvider& strux)
 {
 }
 
+CommandEntry TelemetryManager::statsCommand_{
+    "telemetry", "stats", &InvokeCommand<&TelemetryManager::Cmd_Stats>
+};
+
 void TelemetryManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -34,7 +38,7 @@ void TelemetryManager::Init()
     // "enabled: false" is the whole point of asking it on a device whose graph is
     // empty. A command that disappears when the thing it reports on is off cannot
     // report that it is off.
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, { &statsCommand_ });
 
     if (!enabled_.Get())
     {

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cassert>
 #include <cstddef>
+#include <initializer_list>
 
 class Stream;
 
@@ -36,36 +37,40 @@ public:
 
     void Init();
 
-    /// Register a table of commands. `commands` MUST have static storage
-    /// duration (see ~CommandEntry). `ctx` (usually the owner's `this`) is
-    /// stamped into every entry and handed back to its handler at dispatch.
+    /// Register this manager's commands. Each one is an object the manager owns
+    /// and names; nothing is generated, nothing registers itself, and the list is
+    /// the manager saying which of its commands exist:
+    ///
+    ///     strux_.getCommandManager().Register(this, { &pingCommand_, &infoCommand_ });
+    ///
+    /// Every entry MUST have static storage duration (see ~CommandEntry). `ctx` is
+    /// the owner's `this`, stamped into each entry and handed back to its handler at
+    /// dispatch — it cannot come from the entry itself, because an entry is
+    /// initialised before any manager exists.
     ///
     /// Thread-safe, and usable from construction — managers whose Init()
     /// runs before CommandManager's may register safely.
-    template <size_t N>
-    void Register(void* ctx, CommandEntry (&commands)[N])
+    void Register(void* ctx, std::initializer_list<CommandEntry*> commands)
     {
         LOCK(mutex_);
-        for (size_t i = 0; i < N; ++i)
+        for (CommandEntry* c : commands)
         {
             // Re-registering would re-link an entry already in the chain
             // and cycle it → Execute() would hang. Chain-corruption class,
             // so FATAL (survives NDEBUG), not assert.
-            if (commands[i].registered)
-                FATAL("command '%s %s' registered twice",
-                      commands[i].category, commands[i].name);
-            assert(Find(commands[i].category, commands[i].name) == nullptr &&
-                   "duplicate command name");
+            if (c->registered)
+                FATAL("command '%s %s' registered twice", c->category, c->name);
+            assert(Find(c->category, c->name) == nullptr && "duplicate command name");
             // The declaration list is null-terminated and the last slot is the
-            // terminator's. A table that fills it would be walked off the end.
-            if (commands[i].args[MAX_COMMAND_ARGS] != nullptr)
+            // terminator's. A list that fills it would be walked off the end.
+            if (c->args[MAX_COMMAND_ARGS] != nullptr)
                 FATAL("command '%s %s' declares more than %d arguments",
-                      commands[i].category, commands[i].name, (int)MAX_COMMAND_ARGS);
+                      c->category, c->name, (int)MAX_COMMAND_ARGS);
 
-            commands[i].ctx = ctx;
-            commands[i].registered = true;
-            commands[i].next = head_;
-            head_ = &commands[i];
+            c->ctx = ctx;
+            c->registered = true;
+            c->next = head_;
+            head_ = c;
         }
     }
 
@@ -137,7 +142,7 @@ private:
     /// MAX_CATEGORIES of them.
     size_t CollectCategories(const char** out, size_t cap, bool& truncated);
 
-    /// Defined in CommandManager.cpp, beside the handlers and the arguments they
-    /// read. The bound is the entry count.
-    static CommandEntry commands_[2];
+    // Defined in CommandManager.cpp, beside the handlers and the arguments they read.
+    static CommandEntry listCommand_;
+    static CommandEntry describeCommand_;
 };

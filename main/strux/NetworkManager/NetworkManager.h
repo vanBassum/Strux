@@ -203,11 +203,8 @@ private:
     // ── WebSocket commands (registered with CommandManager in Init) ──
     CommandResult Cmd_WifiScan(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "wifi", "scan", &InvokeCommand<&NetworkManager::Cmd_WifiScan>,
-          "Scan for WiFi networks in range and report each one's SSID and signal "
-          "strength. Takes a few seconds and briefly disturbs the connection." },
-    };
+    // Defined in NetworkManager.cpp, beside the handler.
+    static CommandEntry wifiScanCommand_;
 
     // ── Settings (registered with SettingsManager in Init) ──
     inline static StringSetting wifiSsid_    { "wifi.ssid",     "WiFi SSID",     "" };

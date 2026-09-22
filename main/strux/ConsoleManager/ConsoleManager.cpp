@@ -42,6 +42,12 @@ ConsoleManager::ConsoleManager(StruxProvider& strux)
 {
 }
 
+CommandEntry ConsoleManager::logListCommand_{
+    "log", "list", &InvokeCommand<&ConsoleManager::Cmd_GetLogs>,
+    "Return the device's in-memory log ring - everything it has printed since "
+    "boot, oldest first. The ring is fixed size, so older lines are gone."
+};
+
 void ConsoleManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -63,7 +69,7 @@ void ConsoleManager::Init()
 
     // ConsoleManager initializes before CommandManager::Init() — fine by
     // design: the registry is usable from construction.
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, { &logListCommand_ });
 
     initAttempt.SetReady();
     ESP_LOGI(TAG, "Initialized (capturing stdout)");

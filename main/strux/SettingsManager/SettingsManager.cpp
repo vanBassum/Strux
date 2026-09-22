@@ -35,18 +35,24 @@ constexpr CommandArg<const char*> valueArg{
 
 } // namespace
 
-CommandEntry SettingsManager::commands_[3] = {
-    { "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
-      "List every setting registered on this device with its key, label, type "
-      "and current value. This is the whole configuration surface - there are "
-      "no hidden keys." },
-    { "settings", "set",  &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
-      "Change one setting's value in RAM. NOT durable on its own: call "
-      "'settings save' afterwards or the change is lost at the next reboot.",
-      { &keyArg, &valueArg } },
-    { "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
-      "Commit every setting changed with 'settings set' to NVS so they survive "
-      "a reboot. Several settings only take effect after one." },
+CommandEntry SettingsManager::listCommand_{
+    "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
+    "List every setting registered on this device with its key, label, type "
+    "and current value. This is the whole configuration surface - there are "
+    "no hidden keys."
+};
+
+CommandEntry SettingsManager::setCommand_{
+    "settings", "set", &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
+    "Change one setting's value in RAM. NOT durable on its own: call "
+    "'settings save' afterwards or the change is lost at the next reboot.",
+    { &keyArg, &valueArg }
+};
+
+CommandEntry SettingsManager::saveCommand_{
+    "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
+    "Commit every setting changed with 'settings set' to NVS so they survive "
+    "a reboot. Several settings only take effect after one."
 };
 
 void SettingsManager::Init()
@@ -60,7 +66,11 @@ void SettingsManager::Init()
 
     // Registered before the NVS work so the commands exist even if NVS
     // fails to open (getSettings then reports defaults).
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, {
+        &listCommand_,
+        &setCommand_,
+        &saveCommand_,
+    });
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)

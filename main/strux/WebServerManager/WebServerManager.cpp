@@ -38,13 +38,13 @@ constexpr CommandArg<const char*> pathArg{
 
 } // namespace
 
-CommandEntry WebServerManager::commands_[1] = {
-    { "web",  "read",   &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
-      "Read one file of the device's own web UI. The reply is a JSON header "
-      "line (status, content type, encoding), a newline, then the raw bytes - "
-      "which may be gzipped. It serves the device's browser page; it is not a "
-      "general filesystem.",
-      { &pathArg } },
+CommandEntry WebServerManager::readCommand_{
+    "web", "read", &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
+    "Read one file of the device's own web UI. The reply is a JSON header "
+    "line (status, content type, encoding), a newline, then the raw bytes - "
+    "which may be gzipped. It serves the device's browser page; it is not a "
+    "general filesystem.",
+    { &pathArg }
 };
 
 WebServerManager::WebServerManager(StruxProvider& strux)
@@ -73,7 +73,7 @@ void WebServerManager::Init()
     StartServer();
     RegisterRoutes();
 
-    strux_.getCommandManager().Register(this, commands_);
+    strux_.getCommandManager().Register(this, { &readCommand_ });
 
     // Log delivery is a PULL now: every connection holds a cursor into the console
     // ring and this task walks them. What that removes is not the callback so much

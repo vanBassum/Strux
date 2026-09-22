@@ -131,9 +131,8 @@ private:
     // ── Commands (registered with CommandManager in Init) ──
     CommandResult Cmd_Stats(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "telemetry", "stats", &InvokeCommand<&TelemetryManager::Cmd_Stats> },
-    };
+    // Defined in TelemetryManager.cpp, beside the handler.
+    static CommandEntry statsCommand_;
 
     StruxProvider& strux_;
     InitState initState_;
