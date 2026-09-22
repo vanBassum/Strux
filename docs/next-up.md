@@ -9,31 +9,26 @@ Last updated 2026-09-22.
 
 ## Now
 
-**Commands declare their arguments instead of being executed to be described.** A
+**Every command declares its arguments, and `help` no longer executes anything.** A
 command's arguments are `constexpr CommandArg<T>` descriptors named by its
 `CommandEntry`; the framework decodes them before the handler runs and the handler
-reads them with `ctx.arg()`. `help` reads that metadata rather than re-dispatching the
-handler with a reader that prints instead of filling, so a handler can no longer run
-its body under `help`. The decoder is one forward scan that unescapes strings where
-they lie, so a decoded string points into the envelope buffer and neither the
-handler's `char[N]` nor the reader's value temporary exists.
+reads them with `ctx.arg()` / `ctx.has()`. All 24 commands are converted, so
+`DescribeArguments` reads metadata and never re-dispatches -- `system reboot` is now
+describable without being at risk of executing. `help describe` for the whole registry
+is byte-identical to the capture taken before the migration, checked on the bench
+devkit.
 
-Landed: the types plus host tests (`test/test_command_args.cpp`), the dispatch wiring,
-and the four `partition` commands that take arguments. `help describe -category
-partition` is byte-identical before and after, checked against the bench devkit.
+**Next: delete the old mechanism**, which is standing unreachable and must go as its
+own reviewable change -- `DescribeArgReader`, `ArgReader`, `ArgSpec` with its eight
+Required/Optional factories, `JsonArgReader::read`/`fill` (NOT the class: its
+constructor still consumes the envelope line), `CommandContext::readArgs`,
+`RETURN_IF_ERROR` and `RequestError::Described`. Then, each on its own:
 
-Still to do, in order, each its own reviewable change:
-1. convert the remaining handlers, one manager per commit;
-2. delete the old path (`DescribeArgReader`, `ArgReader`, `readArgs`,
-   `RequestError::Described`) and only then rework the result enum into
-   `CommandResult`;
-3. reply framing -- `reply.body(contentType)` sealing the structured part, so no
+1. rework `RequestError` into `CommandResult` -- `Described` is what forced the name,
+   and #43 wants a result meaning "the reply is incomplete";
+2. reply framing -- `reply.body(contentType)` sealing the structured part, so no
    handler writes a newline or touches `ctx.out`;
-4. collapse `category` + `name` into one identifier.
-
-**A command counts as converted exactly when it declares arguments**, which is why
-zero-argument handlers still call `ctx.readArgs()`. Taking that line away before step 2
-makes `help` re-dispatch them and run their bodies -- `system reboot` among them.
+3. collapse `category` + `name` into one identifier.
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the
