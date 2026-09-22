@@ -246,6 +246,33 @@ What follows from one page, and is worth keeping in mind:
   serves whole, through its asset proxy. That fallback is the relay's own and predates
   this change.
 
+### The shell is on shadcn preset `b0`, and three things deliberately differ
+
+Re-apply with `pnpm dlx shadcn@latest apply --preset b0 -y` to pick up upstream component
+fixes and the shared token set — that is what keeps the template and its forks from
+disagreeing by accident. It overwrites all of `src/components/ui/`, the theme tokens and
+the font import, so **a re-apply is followed by a review, not a commit**. What it will
+undo, and why each one stands:
+
+- **Inter, latin subset only.** `index.css` writes the `@font-face` itself instead of
+  importing the package, which pulls seven unicode-range-gated subsets: 218 KB of woff2,
+  170 KB of which an English UI can never request. Here that is OTA slot, not a data
+  partition — the frontend is linked into the app image — so the fork that reported this
+  (DPS50xx, with a 917 KB `www` partition) could afford what this template cannot. A fork
+  shipping non-Latin text imports the package whole and takes the 170 KB back.
+- **`next-themes` is wired up rather than carried.** The preset's `sonner.tsx` calls
+  `useTheme()`; `main.tsx` supplies the `ThemeProvider` (`attribute="class"`, which is what
+  `@custom-variant dark` keys on), and `ThemeToggle` in the sidebar header cycles
+  system/light/dark. The choice lives in the browser's localStorage, not in device
+  settings: it is a property of who is looking. Before this the `.dark` tokens were
+  unreachable and the UI was light-only.
+- **`clsx`, `tailwind-merge` and `lib/utils.ts` are gone.** The preset's components import
+  `cn` from the `cn` package, so the old wrapper and its two dependencies had no callers.
+
+The preset is an origin to re-apply, not an authority to obey; the test for a deviation is
+whether the device pays for something it gets nothing back for. See
+`docs/reasoning/2026-09-22-09h45-a-preset-is-an-origin-to-re-apply-not-an-authority-to-obey.md`.
+
 ### Deliberately out of scope
 
 MQTT and Home Assistant integration were removed 2026-07-06 (last present at tag-time commit `4a41d74`): devices that exist to live in Home Assistant are better served by ESPHome; Strux is for product firmware with its own UI and relay-based remote access. Do not reintroduce an MQTT/HA layer in the template — a fork that truly needs it can resurrect the old managers from git history.

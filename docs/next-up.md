@@ -5,7 +5,7 @@ lands or is dropped — never ticked off in place. Everything else lives in
 GitHub issues (work for later) or `docs/reasoning/` (why things are the way they are).
 If a fact wants to survive, it does not belong in this file.
 
-Last updated 2026-09-21.
+Last updated 2026-09-22.
 
 ## Now
 
@@ -35,8 +35,10 @@ carry no `www` and both slots read 0x1F0000, the LED toggle round-trips, all thr
 assets serve over HTTP and `web read`, and the console backfill and the session-0 live
 feed both work. What is left needs eyes and a second machine:
 
-- **A browser at every width** — the sidebar surviving, and the redesigned Settings
-  page (two-column card grid, category chip row) laying out as intended.
+- **A browser at every width, now in both themes** — the sidebar surviving, and the
+  redesigned Settings page (two-column card grid, category chip row) laying out as
+  intended. The sidebar header's new system/light/dark toggle is the first thing ever to
+  put the `.dark` tokens in play, so every page needs one dark look.
 - **The relay path** — `relay.url` on the bench devkit points at
   `ws://192.168.50.109:8080/device`, which refuses the connection, so the relay has
   never served this build. (A *second* C3, `esp32-50787d83db6c`, has been driven through

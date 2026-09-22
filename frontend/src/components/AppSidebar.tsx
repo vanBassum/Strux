@@ -17,6 +17,7 @@ import { useLatestRelease } from "@/hooks/use-latest-release"
 import { isNewerVersion } from "@/lib/version"
 import { PreReleaseBadge } from "@/components/PreReleaseBadge"
 import { DeviceInfoDialog } from "@/components/DeviceInfoDialog"
+import { ThemeToggle } from "@/components/ThemeToggle"
 
 // The nav, and the first entry is the product. "home" is a fixed id rather than the
 // feature's name so that a fork replacing this template's demo feature replaces the
@@ -78,6 +79,7 @@ export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold">{info?.name ?? "…"}</span>
           <PreReleaseBadge version={info?.firmware} />
+          <ThemeToggle />
         </div>
       </SidebarHeader>
       <SidebarContent>
