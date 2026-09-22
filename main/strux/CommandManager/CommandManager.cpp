@@ -45,7 +45,24 @@ RequestError CommandManager::Execute(const char* category, const char* name,
     // deletes it without touching a single handler.
     JsonArgReader reader(in);
     JsonReplyWriter writer(out);
-    CommandContext ctx(reader, writer, in, out, connection);
+
+    // A command that declares its arguments statically gets them decoded here, before
+    // its handler runs; one that has not been converted yet still pulls them itself
+    // through the reader. Both read the same consumed envelope line, so the two paths
+    // cost one buffer between them and never both run for one command.
+    ArgValues values;
+    if (e->args[0] != nullptr)
+    {
+        const char* failed = nullptr;
+        const RequestError err = DecodeJsonArgs(reader.envelope(), e->args, values, failed);
+        if (err != RequestError::Ok)
+        {
+            if (failedArg) *failedArg = failed;
+            return err;
+        }
+    }
+
+    CommandContext ctx(reader, writer, in, out, connection, e->args, &values);
     const RequestError err = e->handler(e->ctx, ctx);
     if (err != RequestError::Ok && failedArg)
         *failedArg = reader.failedArgument();
@@ -230,6 +247,28 @@ RequestError CommandManager::DescribeCommand(const char* category, const char* c
 
 bool CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& args)
 {
+    if (entry.args[0] != nullptr)
+    {
+        // Static declarations: read, not run. Nothing is dispatched, so nothing can
+        // reach a handler's body, and a command without arguments is describable the
+        // moment it says so rather than by being executed carefully.
+        for (int i = 0; entry.args[i] != nullptr; ++i)
+        {
+            const ArgDesc& d = *entry.args[i];
+            auto arg = args.object();
+            arg.field("name", d.name);
+            arg.field("type", ArgTypeName(d.type));
+            arg.field("required", d.required);
+            if (d.type == ArgType::String)
+                arg.field("maxLength", static_cast<uint32_t>(d.maxLength));
+            // Absent rather than empty when the command did not describe it, so a
+            // reader can tell "nothing was said" from "said to be nothing".
+            if (d.description != nullptr && d.description[0] != '\0')
+                arg.field("description", d.description);
+        }
+        return true;
+    }
+
     // Not through Execute(): that one is the wire path — it builds the reader for
     // today's format and reports which argument a parse tripped over. Here the reader
     // IS the point, and there is no request to parse.

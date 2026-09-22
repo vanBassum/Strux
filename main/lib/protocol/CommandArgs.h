@@ -142,6 +142,8 @@ inline constexpr size_t MAX_COMMAND_ARGS = 6;
 /// buffer the decoder was given, so nothing here is copied and nothing is owned.
 class ArgValues
 {
+    union Value { const char* s; uint32_t u; int32_t i; float f; bool b; };
+
 public:
     void set(size_t i, const char* v) { v_[i].s = v;  present_[i] = true; }
     void set(size_t i, uint32_t v)    { v_[i].u = v;  present_[i] = true; }
@@ -151,24 +153,25 @@ public:
 
     bool has(size_t i) const { return i < MAX_COMMAND_ARGS && present_[i]; }
 
+    /// An out-of-range slot reads as absent rather than faulting, so a handler asking
+    /// for an argument its command never declared gets a harmless value after the
+    /// assert that names the bug -- and a string is "" rather than null, which is what
+    /// the handler's own zero-initialised buffer used to give it.
     template <typename T>
     T get(size_t i) const
     {
-        if (i >= MAX_COMMAND_ARGS) return T{};
-        if constexpr (std::is_same_v<T, const char*>)
-            // Never null: a handler that reads an absent optional string without
-            // asking has() gets an empty one, which is what its own zero-initialised
-            // buffer used to give it.
-            return v_[i].s != nullptr ? v_[i].s : "";
-        else if constexpr (std::is_same_v<T, uint32_t>) return v_[i].u;
-        else if constexpr (std::is_same_v<T, int32_t>)  return v_[i].i;
-        else if constexpr (std::is_same_v<T, float>)    return v_[i].f;
-        else if constexpr (std::is_same_v<T, bool>)     return v_[i].b;
+        static constexpr Value absent{};
+        const Value& v = (i < MAX_COMMAND_ARGS) ? v_[i] : absent;
+
+        if constexpr (std::is_same_v<T, const char*>) return v.s != nullptr ? v.s : "";
+        else if constexpr (std::is_same_v<T, uint32_t>) return v.u;
+        else if constexpr (std::is_same_v<T, int32_t>)  return v.i;
+        else if constexpr (std::is_same_v<T, float>)    return v.f;
+        else if constexpr (std::is_same_v<T, bool>)     return v.b;
         else static_assert(sizeof(T) == 0, "unsupported argument type");
     }
 
 private:
-    union Value { const char* s; uint32_t u; int32_t i; float f; bool b; };
 
     Value v_[MAX_COMMAND_ARGS] = {};
     bool  present_[MAX_COMMAND_ARGS] = {};

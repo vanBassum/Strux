@@ -53,6 +53,12 @@ public:
         return RequestError::Ok;
     }
 
+    /// The consumed envelope, for the decoder that reads a command's STATIC argument
+    /// declarations rather than its readArgs call. Mutable because that decoder
+    /// unescapes strings where they lie. Transitional: it goes when this class does,
+    /// and the line-reading above becomes the decoder's own.
+    char* envelope() { return line_; }
+
 private:
     char line_[MAX_ENVELOPE] = {};
 

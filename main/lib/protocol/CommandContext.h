@@ -3,6 +3,7 @@
 #include "Stream.h"
 #include "ReplyWriter.h"
 #include "CommandArgs.h"
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 
@@ -145,11 +146,17 @@ public:
 class CommandContext
 {
 public:
+    /// `args` is the command's declaration list, null-terminated, and `values` what a
+    /// decoder made of the request against it. Both are null for a command that has
+    /// not declared its arguments statically yet, which is the only reason `reader`
+    /// and readArgs() below still exist.
     CommandContext(ArgReader& reader, ReplyWriter& writer,
                    Stream& request, Stream& response,
-                   ConnectionAuth* connection = nullptr)
+                   ConnectionAuth* connection = nullptr,
+                   const ArgDesc* const* args = nullptr,
+                   const ArgValues* values = nullptr)
         : in(request), out(response), reply(writer),
-          connection(connection), reader_(reader) {}
+          connection(connection), reader_(reader), args_(args), values_(values) {}
 
     CommandContext(const CommandContext&) = delete;
     CommandContext& operator=(const CommandContext&) = delete;
@@ -166,8 +173,32 @@ public:
     /// nothing. Only the `auth` commands have any business touching it.
     ConnectionAuth* const connection;
 
+    /// One declared argument's value, already parsed and validated. Reading an
+    /// argument the command did not declare is a firmware bug and nothing here is
+    /// built to prevent it — the assert names it the first time the command runs.
+    template <typename T>
+    T arg(const CommandArg<T>& a) const
+    {
+        const int i = indexOf(a);
+        assert(i >= 0 && "command reads an argument it did not declare");
+        return values_ != nullptr ? values_->get<T>(static_cast<size_t>(i))
+                                  : ArgValues{}.get<T>(0);
+    }
+
+    /// Did the caller supply it? Only ever interesting for an optional argument, and
+    /// only where absence means something a default cannot express.
+    bool has(const ArgDesc& a) const
+    {
+        const int i = indexOf(a);
+        return i >= 0 && values_ != nullptr && values_->has(static_cast<size_t>(i));
+    }
+
     /// Declare and read every argument at once. Call it even with none — it is what
     /// advances the stream to the body and what stops a handler under `help`.
+    ///
+    /// The path for commands not yet converted to static declarations. It goes away
+    /// with the last of them; a converted handler uses arg()/has() above and the
+    /// framework has already decoded by the time it runs.
     template <typename... Specs>
     RequestError readArgs(Specs... specs)
     {
@@ -181,6 +212,19 @@ public:
 
 private:
     ArgReader& reader_;
+
+    const ArgDesc* const* args_;
+    const ArgValues*      values_;
+
+    /// Which slot this declaration occupies, by identity rather than by name: the
+    /// entry stores the address of the very object the handler reads.
+    int indexOf(const ArgDesc& a) const
+    {
+        if (args_ == nullptr) return -1;
+        for (int i = 0; args_[i] != nullptr; ++i)
+            if (args_[i] == &a) return i;
+        return -1;
+    }
 };
 
 #define RETURN_IF_ERROR(expr) do { RequestError e_ = (expr);                   \

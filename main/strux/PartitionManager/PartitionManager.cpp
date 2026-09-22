@@ -15,6 +15,75 @@ PartitionManager::PartitionManager(StruxProvider& strux)
 {
 }
 
+// --------------------------------------------------------------
+// Arguments and the command table.
+//
+// The descriptors live here rather than in the header because they describe these
+// handlers and nothing else, and because a table in the header would drag every
+// argument's help text into everything that includes it. `partition` is declared
+// twice on purpose: `write` has a warning to give about it that the read-only
+// commands do not, and a description belongs to a declaration rather than to a name.
+// --------------------------------------------------------------
+
+namespace {
+
+// esp_partition_t::label is char[17], so sixteen characters is the longest a label
+// can be -- the number a caller needs, and now declared instead of deduced.
+constexpr uint16_t LABEL_MAX = 16;
+
+constexpr CommandArg<const char*> partitionArg{
+    "partition", "Label of the partition, as 'partition list' reports it.", LABEL_MAX };
+
+constexpr CommandArg<const char*> writePartitionArg{
+    "partition", "Label of the partition to write, as 'partition list' reports it. "
+                 "The running app slot is always refused.", LABEL_MAX };
+
+constexpr CommandArg<uint32_t> offsetArg{
+    "offset", "Byte offset to write at. Omit it for a one-shot upload - the "
+              "whole image in one command, erased and activated by the device. "
+              "Giving one (including 0) means you are driving the upload in "
+              "pieces and own the 'partition clear' and 'partition activate' "
+              "steps yourself.", Presence::Optional };
+
+constexpr CommandArg<bool> restartArg{
+    "restart", "true to reboot into it now. Default false, which leaves the "
+               "switch to take effect whenever the device next restarts. This "
+               "command is the ONLY thing that changes which image boots - "
+               "uploading one does not, and 'system reboot' always comes back "
+               "into the same image it was running.", Presence::Optional };
+
+} // namespace
+
+CommandEntry PartitionManager::commands_[6] = {
+    { "partition", "status",   &InvokeCommand<&PartitionManager::Cmd_UpdateStatus>,
+      "Report the running firmware version, which app slot it booted from, and "
+      "which slot the next update would be written to." },
+    { "partition", "list",     &InvokeCommand<&PartitionManager::Cmd_Partitions>,
+      "List the flash partitions with type, offset, size, and whether each is "
+      "running, is the next OTA slot, or may be written to." },
+    { "partition", "write",    &InvokeCommand<&PartitionManager::Cmd_WritePartition>,
+      "Write an image to a partition. The bytes follow the request envelope in "
+      "the same channel, so this is a streaming upload rather than an argument. "
+      "Destructive: it overwrites what the device boots or serves.",
+      { &writePartitionArg, &offsetArg } },
+    { "partition", "clear",    &InvokeCommand<&PartitionManager::Cmd_ClearPartition>,
+      "Erase a partition. Destructive and immediate - the running app slot is "
+      "refused, anything else is erased.",
+      { &partitionArg } },
+    { "partition", "activate", &InvokeCommand<&PartitionManager::Cmd_ActivatePartition>,
+      "Choose which app partition boots, and optionally reboot into it now. "
+      "This is the only command that changes the boot slot: an upload leaves "
+      "it alone, so a written image sits inert until this says otherwise, and "
+      "'system reboot' returns to the same image every time. An image that "
+      "does not validate is refused.",
+      { &partitionArg, &restartArg } },
+    { "partition", "read",     &InvokeCommand<&PartitionManager::Cmd_DownloadPartition>,
+      "Read a partition back. The reply is one header record - ok, size, and "
+      "contentType application/octet-stream - then a newline, then that many "
+      "raw bytes, streamed until the channel closes. Can be megabytes.",
+      { &partitionArg } },
+};
+
 void PartitionManager::Init()
 {
     auto initAttempt = initState_.TryBeginInit();
@@ -190,27 +259,10 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
     // so the client's bar tracks the real write, not bytes queued into the socket.
     static constexpr size_t REPORT_EVERY = 32 * 1024;
 
-    char label[17] = {};
-    uint32_t offset = 0;
+    const char*    label  = ctx.arg(writePartitionArg);
+    const uint32_t offset = ctx.arg(offsetArg);
 
-    // Absence and a legitimate zero mean different things here, hence has():
-    // no `offset` is the one-shot upload — start at zero, erase as we go, activate
-    // at the end, the whole image in one command, which is what the web UI sends.
-    // An explicit offset (including 0) means the sender is driving the upload in
-    // pieces and owns the clearPartition and activatePartition steps itself.
-    RETURN_IF_ERROR(ctx.readArgs(
-        Required("partition", label,
-                 "Label of the partition to write, as 'partition list' reports it. "
-                 "The running app slot is always refused."),
-        Optional("offset",    offset,
-                 "Byte offset to write at. Omit it for a one-shot upload - the "
-                 "whole image in one command, erased and activated by the device. "
-                 "Giving one (including 0) means you are driving the upload in "
-                 "pieces and own the 'partition clear' and 'partition activate' "
-                 "steps yourself.")
-    ));
-
-    // `in` is now positioned at the body, past the envelope.
+    // `in` is positioned at the body, past the envelope the framework decoded.
     const char* err = nullptr;
     PartitionWriter w(label, offset, &err);
     if (!w.ok())
@@ -306,9 +358,7 @@ RequestError PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 
 RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 {
-    char label[17] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
-        "Label of the partition, as 'partition list' reports it.")));
+    const char* label = ctx.arg(partitionArg);
 
     auto resp = ctx.reply.object();
     if (const char* err = PartitionWriter::Clear(label))
@@ -323,17 +373,8 @@ RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 
 RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
 {
-    char label[17] = {};
-    bool restart   = false;
-    RETURN_IF_ERROR(ctx.readArgs(
-        Required("partition", label,
-                 "Label of the partition, as 'partition list' reports it."),
-        Optional("restart", restart,
-                 "true to reboot into it now. Default false, which leaves the "
-                 "switch to take effect whenever the device next restarts. This "
-                 "command is the ONLY thing that changes which image boots - "
-                 "uploading one does not, and 'system reboot' always comes back "
-                 "into the same image it was running.")));
+    const char* label   = ctx.arg(partitionArg);
+    const bool  restart = ctx.arg(restartArg);
 
     bool activated = false;
     {
@@ -367,9 +408,7 @@ RequestError PartitionManager::Cmd_ActivatePartition(CommandContext& ctx)
 
 RequestError PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
 {
-    char label[17] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("partition", label,
-        "Label of the partition, as 'partition list' reports it.")));
+    const char* label = ctx.arg(partitionArg);
 
     const esp_partition_t* p = esp_partition_find_first(
         ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, label);

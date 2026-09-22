@@ -77,29 +77,11 @@ private:
     /// Validate an app image and make it the next boot slot. No-op for data.
     RequestError Cmd_ActivatePartition(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "partition", "status",   &InvokeCommand<&PartitionManager::Cmd_UpdateStatus>,
-          "Report the running firmware version, which app slot it booted from, and "
-          "which slot the next update would be written to." },
-        { "partition", "list",     &InvokeCommand<&PartitionManager::Cmd_Partitions>,
-          "List the flash partitions with type, offset, size, and whether each is "
-          "running, is the next OTA slot, or may be written to." },
-        { "partition", "write",    &InvokeCommand<&PartitionManager::Cmd_WritePartition>,
-          "Write an image to a partition. The bytes follow the request envelope in "
-          "the same channel, so this is a streaming upload rather than an argument. "
-          "Destructive: it overwrites what the device boots or serves." },
-        { "partition", "clear",    &InvokeCommand<&PartitionManager::Cmd_ClearPartition>,
-          "Erase a partition. Destructive and immediate - the running app slot is "
-          "refused, anything else is erased." },
-        { "partition", "activate", &InvokeCommand<&PartitionManager::Cmd_ActivatePartition>,
-          "Choose which app partition boots, and optionally reboot into it now. "
-          "This is the only command that changes the boot slot: an upload leaves "
-          "it alone, so a written image sits inert until this says otherwise, and "
-          "'system reboot' returns to the same image every time. An image that "
-          "does not validate is refused." },
-        { "partition", "read",     &InvokeCommand<&PartitionManager::Cmd_DownloadPartition>,
-          "Read a partition back. The reply is one header record - ok, size, and "
-          "contentType application/octet-stream - then a newline, then that many "
-          "raw bytes, streamed until the channel closes. Can be megabytes." },
-    };
+    /// Defined in PartitionManager.cpp, beside the handlers and the argument
+    /// descriptors they read. A static data member's definition is in the class's
+    /// scope, so the table may name these private handlers from there; keeping it out
+    /// of the header is what keeps the argument metadata next to the code it
+    /// describes. The bound is the entry count -- getting it wrong is a compile error
+    /// at the definition.
+    static CommandEntry commands_[6];
 };

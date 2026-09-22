@@ -56,6 +56,11 @@ public:
                       commands[i].category, commands[i].name);
             assert(Find(commands[i].category, commands[i].name) == nullptr &&
                    "duplicate command name");
+            // The declaration list is null-terminated and the last slot is the
+            // terminator's. A table that fills it would be walked off the end.
+            if (commands[i].args[MAX_COMMAND_ARGS] != nullptr)
+                FATAL("command '%s %s' declares more than %d arguments",
+                      commands[i].category, commands[i].name, (int)MAX_COMMAND_ARGS);
 
             commands[i].ctx = ctx;
             commands[i].registered = true;

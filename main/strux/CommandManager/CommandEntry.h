@@ -42,6 +42,20 @@ struct CommandEntry
     /// belongs in the device's instructions (`system describe`).
     const char* help = nullptr;
 
+    /// The arguments this command takes, in the order `help` reports them, ending at
+    /// the first null. Each entry is the address of the very `CommandArg<T>` object
+    /// the handler reads, so ctx.arg() matches by identity and there is no second
+    /// place for an argument's name or type to live.
+    ///
+    /// Empty means the command has NOT been converted to static declarations yet, and
+    /// still declares its arguments by calling ctx.readArgs() inside its handler --
+    /// which is also how `help` still has to describe it. The distinction disappears
+    /// with the last unconverted command.
+    ///
+    /// One slot longer than a command may declare, so the terminator always fits;
+    /// Register() refuses a table that fills it.
+    const ArgDesc* args[MAX_COMMAND_ARGS + 1] = {};
+
     // Managed by CommandManager::Register() — owners never touch these.
     void* ctx = nullptr;
     CommandEntry* next = nullptr;
