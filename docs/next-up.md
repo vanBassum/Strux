@@ -25,6 +25,19 @@ it is needed), and `help list` existed only to walk that tree, so both went. Pro
 the bench devkit: 23 commands, each one's declarations identical to the capture taken
 before any of it.
 
+**There are two codecs now, and the dispatch path below them is one.** A request line
+starting with `{` is JSON; anything else is the console codec (`led set enabled=true`,
+answered in YAML). `RunCommandChannel` sniffs the line and builds the matching
+`Envelope` + `ReplyWriter` pair; `CommandManager::Execute` takes both as interfaces and
+names no syntax, and not one handler changed. The Console page is a terminal speaking
+it directly — nothing in the browser translates a typed line into an envelope. Proven
+on the bench devkit for every representative shape: a scalar reply, a nested one, a
+refusal, a missing required argument, a quoted value, a block scalar
+(`system describe`) and a declared body (`web read`, `partition read`). See the
+**Codecs** section of CLAUDE.md for what it exposed — a record separator turned out to
+belong to a codec rather than to the protocol, and the request's size limits had to
+move out from behind a FreeRTOS include.
+
 Two things deliberately NOT done, and tracked as issues rather than folded in:
 [#42](https://github.com/vanBassum/Strux/issues/42) (stale `partition write` prose),
 [#43](https://github.com/vanBassum/Strux/issues/43) (`partition read` FINALs after a

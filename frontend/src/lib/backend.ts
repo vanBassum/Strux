@@ -2,6 +2,7 @@
 
 import { DEV_HOST } from "@/config"
 import { ReplyReader, type ReplyResult } from "./reply"
+import { ConsoleReplyReader, type ConsoleReply } from "./consoleReply"
 
 const TOKEN_KEY = "device.token"
 
@@ -15,8 +16,10 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>
   timeoutMs: number
   // Turns transport chunks back into reply records. It, and not this file, is
-  // what knows the reply format — see lib/reply.ts.
-  reader: ReplyReader
+  // what knows the reply format — and WHICH one it knows is the codec's business,
+  // because a record separator belongs to a codec rather than to the protocol.
+  // See lib/reply.ts (JSON) and lib/consoleReply.ts (console).
+  reader: ReplyReader | ConsoleReplyReader
   // Called for each record completed before the last one. A record is delimited
   // by a newline in the BYTES, so this fires the same way whatever size the
   // transport framed in.
@@ -25,6 +28,9 @@ interface PendingRequest {
   // caller that has no type for the reply — the command console — still wants a
   // record that is not JSON, which onMessage drops.
   onRecord?: (text: string) => void
+  // The reply is in the CONSOLE codec, so its records are divided by `---` and
+  // not by a newline, and it resolves with that reader's result.
+  wantsConsole?: boolean
   // The caller expects a declared body (a header record with contentType, then
   // bytes). Resolves with { header, body } instead of the parsed record.
   wantsBody?: boolean
@@ -469,6 +475,7 @@ class BackendService {
       timeoutMs?: number
       onMessage?: (msg: Record<string, unknown>) => void
       onRecord?: (text: string) => void
+      wantsConsole?: boolean
       wantsBody?: boolean
       wantsRaw?: boolean
       onData?: (received: number) => void
@@ -487,7 +494,8 @@ class BackendService {
         reject,
         timer,
         timeoutMs,
-        reader: new ReplyReader(),
+        reader: opts.wantsConsole ? new ConsoleReplyReader() : new ReplyReader(),
+        wantsConsole: opts.wantsConsole,
         onMessage: opts.onMessage,
         onRecord: opts.onRecord,
         wantsBody: opts.wantsBody,
@@ -656,7 +664,13 @@ class BackendService {
 
     this.pending.delete(session)
     clearTimeout(req.timer)
-    const reply = req.reader.end()
+
+    if (req.wantsConsole) {
+      req.resolve((req.reader as ConsoleReplyReader).end())
+      return
+    }
+
+    const reply = (req.reader as ReplyReader).end()
 
     if (req.wantsRaw) {
       req.resolve(reply)
@@ -715,6 +729,31 @@ class BackendService {
    *  console is built entirely out of what this returns. */
   async describeCommands(): Promise<CommandRegistry> {
     return this.send<CommandRegistry>("help", {}, { timeoutMs: 20000 })
+  }
+
+  /** One command in the CONSOLE codec: the line as typed, verbatim.
+   *
+   *  Nothing is translated on the way out — `led set enabled=true` reaches the
+   *  device as those bytes, and the firmware's ConsoleEnvelope is what reads
+   *  them. The reply comes back as YAML records, which is why this cannot go
+   *  through `execute`: that one's reader divides records by newline, which is
+   *  the JSON codec's separator and not the protocol's. */
+  async runConsole(
+    line: string,
+    opts: { timeoutMs?: number; onRecord?: (text: string) => void } = {},
+  ): Promise<ConsoleReply> {
+    return this.enqueue(async () => {
+      await this.ensureConnected()
+      const session = this.allocSession()
+      const reply = this.awaitReply<ConsoleReply>(session, {
+        timeoutMs: opts.timeoutMs ?? 30000,
+        onRecord: opts.onRecord,
+        wantsConsole: true,
+      })
+      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, new TextEncoder().encode(`${line}
+`))
+      return reply
+    })
   }
 
   async getSettings(): Promise<SettingsResponse> {

@@ -1,109 +1,351 @@
-import { useEffect, useRef, useState } from "react"
-import { backend } from "@/lib/backend"
-import { useConnectionStatus } from "@/hooks/use-connection-status"
-import { TerminalIcon, TrashIcon, ArrowDownIcon } from "lucide-react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { SendIcon, TerminalIcon } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
+import { useCommands } from "@/hooks/use-commands"
+import { backend } from "@/lib/backend"
+import { complete, matchCommand, signature } from "@/lib/commandline"
 import { toast } from "sonner"
 
+/**
+ * The device's console, speaking the device's console codec.
+ *
+ * What is typed here goes to the device as those bytes — `led set enabled=true`
+ * and not an envelope — and what comes back is what the device wrote, which is
+ * YAML because that is the codec's reply half. Nothing in this file translates
+ * between the two; the codec is in the firmware
+ * (main/lib/protocol/ConsoleEnvelope.h and YamlReplyWriter.h) and the browser is
+ * simply a second client of it.
+ *
+ * The registry is still used, and only for the prompt: Tab completes a command
+ * name, then an argument name, then a bool's value, all off `help`. Completion is
+ * an offer, never a rewrite — a line the registry has never heard of is sent
+ * exactly as typed, and the device is what refuses it.
+ *
+ * The device's log stream shares the view, because that is what a console is:
+ * lines the device printed, interleaved with the commands that caused them.
+ */
+
+/** Scrollback. Old rows keep their whole text, so this is a memory bound as much
+ *  as a scrollback one. */
+const MAX_ROWS = 500
+
+/** How much of one record is drawn. `partition read` answers in megabytes, and a
+ *  megabyte of text in the DOM hangs the tab. */
+const RECORD_LIMIT = 32 * 1024
+
+type Kind = "out" | "in" | "log" | "error"
+
+interface Row {
+  id: number
+  at: Date
+  kind: Kind
+  text: string
+  /** Elapsed round trip, on the row that completed a command. */
+  meta?: string
+}
+
+let nextRowId = 1
+
 export default function ConsolePage() {
-  const connection = useConnectionStatus()
-  const [lines, setLines] = useState<string[]>([])
-  const [autoScroll, setAutoScroll] = useState(true)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const { commands } = useCommands()
+  const [rows, setRows] = useState<Row[]>([])
+  const [input, setInput] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [options, setOptions] = useState<string[]>([])
+  const history = useRef<string[]>([])
+  const historyAt = useRef(-1)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch history on connect
+  // Backfill, then live. Both land in the same scrollback as command output.
   useEffect(() => {
-    if (connection !== "connected") return
-    backend.getLogs().then((r) => setLines(r.lines)).catch((e) =>
-      toast.error("Failed to load log history", {
-        description: e instanceof Error ? e.message : "Unknown error",
-      }),
-    )
-  }, [connection])
-
-  // Subscribe to live log broadcasts
-  useEffect(() => {
-    return backend.subscribe((msg) => {
-      if (typeof msg.log === "string") {
-        setLines((prev) => {
-          const next = [...prev, msg.log as string]
-          // Keep last 1000 lines in the UI
-          return next.length > 1000 ? next.slice(-1000) : next
-        })
-      }
-    })
+    backend
+      .getLogs()
+      .then((r) => setRows(r.lines.map(logRow)))
+      .catch((e) =>
+        toast.error("Failed to load log history", {
+          description: e instanceof Error ? e.message : "Unknown error",
+        }),
+      )
   }, [])
 
-  // Auto-scroll
-  useEffect(() => {
-    if (autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" })
-    }
-  }, [lines, autoScroll])
+  useEffect(
+    () =>
+      backend.subscribe((msg) => {
+        if (typeof msg.log === "string") append({ kind: "log", text: msg.log })
+      }),
+    [],
+  )
 
-  // Detect manual scroll
-  function handleScroll() {
-    const el = containerRef.current
-    if (!el) return
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-    setAutoScroll(atBottom)
+  function append(row: Omit<Row, "id" | "at">) {
+    setRows((prev) =>
+      [...prev, { ...row, id: nextRowId++, at: new Date() }].slice(-MAX_ROWS),
+    )
   }
 
+  async function run() {
+    const line = input.trim()
+    if (!line || busy) return
+
+    history.current = [...history.current.filter((h) => h !== line), line]
+    historyAt.current = -1
+    setInput("")
+    setOptions([])
+    append({ kind: "out", text: line })
+    setBusy(true)
+
+    const started = performance.now()
+    try {
+      const reply = await backend.runConsole(line, {
+        // Records completed before the last one, as they arrive: a command that
+        // reports progress is watched rather than summarised at the end.
+        onRecord: (text) => append({ kind: "in", text: clip(text) }),
+      })
+      const elapsed = `${Math.round(performance.now() - started)} ms`
+
+      // The records already seen came through onRecord; only the last one is new.
+      const last = reply.body === null ? reply.records.at(-1) : undefined
+      if (last !== undefined && reply.records.length > 0)
+        append({ kind: "in", text: clip(last), meta: elapsed })
+
+      if (reply.body)
+        append({
+          kind: "in",
+          text: `<${reply.body.length} bytes of ${reply.contentType}` +
+            `${reply.contentEncoding ? `, ${reply.contentEncoding}` : ""}>`,
+          meta: elapsed,
+        })
+
+      if (reply.records.length === 0 && !reply.body)
+        append({ kind: "in", text: "(no reply)", meta: elapsed })
+    } catch (e) {
+      // A RESET carries the device's reason — an unknown command, a missing
+      // argument, `busy`. A timeout and a dropped socket arrive the same way.
+      append({
+        kind: "error",
+        text: e instanceof Error ? e.message : "Failed",
+        meta: `${Math.round(performance.now() - started)} ms`,
+      })
+    } finally {
+      setBusy(false)
+      inputRef.current?.focus()
+    }
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      void run()
+      return
+    }
+
+    if (e.key === "Tab") {
+      e.preventDefault()
+      const { line, options: offered } = complete(input, commands)
+      setInput(line)
+      setOptions(offered.length > 1 ? offered : [])
+      return
+    }
+
+    if (e.key === "l" && e.ctrlKey) {
+      e.preventDefault()
+      setRows([])
+      return
+    }
+
+    if (e.key === "c" && e.ctrlKey) {
+      // A shell's Ctrl+C on a prompt: abandon the line. The device is
+      // single-in-flight and will still answer whatever is running — this stops
+      // waiting for it, it does not reach across and stop the device.
+      e.preventDefault()
+      if (input) append({ kind: "out", text: `${input}^C` })
+      setInput("")
+      setOptions([])
+      return
+    }
+
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (history.current.length === 0) return
+      e.preventDefault()
+      const at =
+        e.key === "ArrowUp"
+          ? Math.min(historyAt.current + 1, history.current.length - 1)
+          : historyAt.current - 1
+      historyAt.current = Math.max(at, -1)
+      setInput(
+        historyAt.current < 0
+          ? ""
+          : history.current[history.current.length - 1 - historyAt.current],
+      )
+    }
+  }
+
+  const current = matchCommand(input, commands)
+
   return (
-    <div className="flex h-full flex-col">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <TerminalIcon className="size-5 text-muted-foreground" />
-          <h1 className="text-2xl font-bold">Console</h1>
-          <span className="text-sm text-muted-foreground">({lines.length} lines)</span>
-        </div>
-        <div className="flex gap-2">
-          {!autoScroll && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setAutoScroll(true)
-                bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-              }}
-            >
-              <ArrowDownIcon className="mr-1.5 size-3.5" />
-              Scroll to bottom
-            </Button>
-          )}
-          <Button variant="outline" size="sm" onClick={() => setLines([])}>
-            <TrashIcon className="mr-1.5 size-3.5" />
-            Clear
-          </Button>
-        </div>
+    <div className="flex h-full flex-col gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        <TerminalIcon className="size-5 text-muted-foreground" />
+        <h1 className="text-2xl font-bold">Console</h1>
+        <span className="hidden text-sm text-muted-foreground sm:inline">
+          {commands.length > 0 ? `${commands.length} commands` : "connecting…"}
+        </span>
       </div>
 
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-auto rounded-xl border bg-neutral-950 p-4 font-mono text-xs leading-5 text-neutral-300"
-      >
-        {lines.map((line, i) => (
-          <LogLine key={i} line={line} />
-        ))}
-        <div ref={bottomRef} />
+      <Scrollback rows={rows} />
+
+      {/* What the registry knows about the line so far. An offer, never a rule:
+          the device is what decides whether a line is a command. */}
+      <div className="h-5 shrink-0 truncate px-1 font-mono text-xs text-muted-foreground">
+        {options.length > 0
+          ? options.join("  ")
+          : current
+            ? signature(current)
+            : ""}
       </div>
+
+      <form
+        className="flex shrink-0 items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void run()
+        }}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+          <span className="shrink-0 font-mono text-sm text-muted-foreground select-none">
+            &gt;
+          </span>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              setOptions([])
+            }}
+            onKeyDown={onKeyDown}
+            spellCheck={false}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoFocus
+            placeholder="Type a command… (e.g. 'system ping', 'led set enabled=true')"
+            className="min-w-0 flex-1 bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <Button type="submit" disabled={busy} className="shrink-0">
+          <SendIcon className="mr-1.5 size-3.5" />
+          {busy ? "Running…" : "Send"}
+        </Button>
+      </form>
+
+      <p className="shrink-0 px-1 text-xs text-muted-foreground">
+        <Key>↑ ↓</Key> history <Key>Tab</Key> autocomplete <Key>Ctrl+L</Key> clear{" "}
+        <Key>Ctrl+C</Key> cancel
+      </p>
     </div>
   )
 }
 
-// ESP-IDF log colors: E=red, W=yellow, I=green, D=cyan, V=white
-function LogLine({ line }: { line: string }) {
-  // ESP-IDF format: "X (timestamp) tag: message" where X is E/W/I/D/V
-  const level = line.charAt(0)
+function Key({ children }: { children: React.ReactNode }) {
+  return <span className="ml-3 font-mono text-foreground first:ml-0">{children}</span>
+}
 
-  let color = "text-neutral-400"
-  if (level === "E") color = "text-red-400"
-  else if (level === "W") color = "text-yellow-300"
-  else if (level === "I") color = "text-green-400"
-  else if (level === "D") color = "text-cyan-400"
-  else if (level === "V") color = "text-neutral-500"
+/**
+ * Everything typed, everything answered and everything the device printed, oldest
+ * at the top.
+ *
+ * Stuck to the bottom while you are already there, and left alone when you are
+ * not: scrolling up to read what a command did twenty lines ago should not be
+ * undone by the next log line landing.
+ */
+function Scrollback({ rows }: { rows: Row[] }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const pinned = useRef(true)
 
-  return <div className={color}>{line}</div>
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el && pinned.current) el.scrollTop = el.scrollHeight
+  }, [rows])
+
+  return (
+    <div
+      ref={ref}
+      onScroll={(e) => {
+        const el = e.currentTarget
+        pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+      }}
+      className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-muted/30 py-1 font-mono text-xs"
+    >
+      {rows.length === 0 ? (
+        <p className="px-3 py-2 text-muted-foreground">
+          Nothing yet. Type <span className="text-foreground">help</span> to see what
+          this device can do.
+        </p>
+      ) : (
+        rows.map((row) => <Line key={row.id} row={row} />)
+      )}
+    </div>
+  )
+}
+
+function Line({ row }: { row: Row }) {
+  return (
+    <div className="flex items-baseline gap-2 px-3 leading-5 hover:bg-muted/60">
+      <span className="w-[6.5rem] shrink-0 text-muted-foreground tabular-nums">
+        {stamp(row.at)}
+      </span>
+      <span className="w-8 shrink-0 select-none">
+        <Badge kind={row.kind} />
+      </span>
+      <pre className={`min-w-0 flex-1 whitespace-pre-wrap ${tone(row.kind)}`}>
+        {row.text}
+      </pre>
+      {row.meta && (
+        <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+          {row.meta}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** Which direction a line went. A log line has none — the device said it without
+ *  being asked, which is the distinction worth drawing. */
+function Badge({ kind }: { kind: Kind }) {
+  if (kind === "log") return null
+  const label = kind === "out" ? "OUT" : "IN"
+  const colors =
+    kind === "out"
+      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+      : kind === "error"
+        ? "bg-destructive/15 text-destructive"
+        : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+  return (
+    <span className={`rounded px-1 py-px text-[0.625rem] font-medium ${colors}`}>
+      {label}
+    </span>
+  )
+}
+
+function tone(kind: Kind): string {
+  if (kind === "error") return "text-destructive"
+  if (kind === "log") return "text-muted-foreground"
+  return ""
+}
+
+function logRow(line: string): Row {
+  return { id: nextRowId++, at: new Date(), kind: "log", text: line }
+}
+
+function clip(text: string): string {
+  if (text.length <= RECORD_LIMIT) return text
+  return `${text.slice(0, RECORD_LIMIT)}\n… ${text.length - RECORD_LIMIT} more characters`
+}
+
+/** 24-hour clock with milliseconds, which is the resolution a round trip needs. */
+function stamp(at: Date): string {
+  const pad = (v: number, width = 2) => String(v).padStart(width, "0")
+  return (
+    `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}` +
+    `.${pad(at.getMilliseconds(), 3)}`
+  )
 }
