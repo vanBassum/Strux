@@ -27,6 +27,26 @@ static constexpr const char* TAG = "WebServerManager";
 // because the httpd task can outlive a failed Init.
 static WebServerManager* s_instance_ = nullptr;
 
+namespace {
+
+// The old destination was char[192], so 191 characters is the longest path this
+// command has ever accepted -- declared now instead of deduced from a buffer.
+constexpr CommandArg<const char*> pathArg{
+    "path", "Path of the file within the device's web assets, e.g. 'index.html' or "
+            "'assets/index.js'. An empty path or a directory resolves to index.html.",
+    191 };
+
+} // namespace
+
+CommandEntry WebServerManager::commands_[1] = {
+    { "web",  "read",   &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
+      "Read one file of the device's own web UI. The reply is a JSON header "
+      "line (status, content type, encoding), a newline, then the raw bytes - "
+      "which may be gzipped. It serves the device's browser page; it is not a "
+      "general filesystem.",
+      { &pathArg } },
+};
+
 WebServerManager::WebServerManager(StruxProvider& strux)
     : strux_(strux)
 {
@@ -128,12 +148,7 @@ void WebServerManager::RegisterRoutes()
 
 RequestError WebServerManager::Cmd_GetWebFile(CommandContext& ctx)
 {
-    // First handler on the pull contract: no envelope handling, no JsonReader, and
-    // it will keep working unchanged when the request format stops being JSON.
-    char path[192] = {};
-    RETURN_IF_ERROR(ctx.readArgs(Required("path", path,
-        "Path of the file within the device's web assets, e.g. 'index.html' or "
-        "'assets/index.js'. An empty path or a directory resolves to index.html.")));
+    const char* path = ctx.arg(pathArg);
 
     StaticFileHandler::Resolved file;
     const bool found = StaticFileHandler::Resolve(path, file);

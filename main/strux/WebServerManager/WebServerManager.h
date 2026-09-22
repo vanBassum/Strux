@@ -60,11 +60,7 @@ private:
     //   {"ok":true,"status":200,"contentType":"...","contentEncoding":"gzip"}\n<bytes>
     RequestError Cmd_GetWebFile(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "web",  "read",   &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
-          "Read one file of the device's own web UI. The reply is a JSON header "
-          "line (status, content type, encoding), a newline, then the raw bytes - "
-          "which may be gzipped. It serves the device's browser page; it is not a "
-          "general filesystem." },
-    };
+    /// Defined in WebServerManager.cpp, beside the handler and the argument it
+    /// reads. The bound is the entry count.
+    static CommandEntry commands_[1];
 };
