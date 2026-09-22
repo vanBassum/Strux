@@ -122,7 +122,6 @@ private:
     // once and describing it twenty times.
     RequestError Cmd_Describe(CommandContext& ctx);
 
-    static constexpr size_t MAX_ROUTE = 32;        // matches protocol::MAX_COMMAND_NAME
     static constexpr size_t MAX_CATEGORIES = 24;
 
     void ListCategories(ReplyWriter& reply);
@@ -141,12 +140,7 @@ private:
     /// MAX_CATEGORIES of them.
     size_t CollectCategories(const char** out, size_t cap, bool& truncated);
 
-    inline static CommandEntry commands_[] = {
-        { "help", "list",     &InvokeCommand<&CommandManager::Cmd_Help>,
-          "List the device's command categories, one category's commands, or one "
-          "command's arguments." },
-        { "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
-          "Describe every command this firmware offers - category, name, description "
-          "and full argument declarations - in one reply." },
-    };
+    /// Defined in CommandManager.cpp, beside the handlers and the arguments they
+    /// read. The bound is the entry count.
+    static CommandEntry commands_[2];
 };

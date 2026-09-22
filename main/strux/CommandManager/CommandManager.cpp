@@ -96,6 +96,42 @@ const char* DescribeRequestError(RequestError e, const char* arg, char* buf, siz
 
 namespace {
 
+// Was CommandManager::MAX_ROUTE, a 32-byte buffer these two handlers filled and
+// nothing else used. It matches protocol::MAX_COMMAND_NAME, the longest route word
+// the wire router carries; one less is the length at which a value was refused,
+// which is the number the declaration now states outright.
+constexpr uint16_t ROUTE_MAX = 31;
+
+constexpr CommandArg<const char*> listCategoryArg{
+    "category", "Limit the answer to one category, e.g. 'partition'. Omit it to list "
+                "every category and its commands.",
+    ROUTE_MAX, Presence::Optional };
+
+constexpr CommandArg<const char*> listCommandArg{
+    "command", "Describe this one command's arguments. Needs 'category' as well, "
+               "because a route is two words.",
+    ROUTE_MAX, Presence::Optional };
+
+constexpr CommandArg<const char*> describeCategoryArg{
+    "category", "Describe only this category's commands. Omit it for the whole "
+                "registry, which is the usual call.",
+    ROUTE_MAX, Presence::Optional };
+
+} // namespace
+
+CommandEntry CommandManager::commands_[2] = {
+    { "help", "list",     &InvokeCommand<&CommandManager::Cmd_Help>,
+      "List the device's command categories, one category's commands, or one "
+      "command's arguments.",
+      { &listCategoryArg, &listCommandArg } },
+    { "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
+      "Describe every command this firmware offers - category, name, description "
+      "and full argument declarations - in one reply.",
+      { &describeCategoryArg } },
+};
+
+namespace {
+
 // The streams the described handler gets. It is stopped at its readArgs call, so
 // these exist to be unused — and to mean that a handler which somehow reaches its
 // body writes to nobody instead of to the client.
@@ -110,17 +146,8 @@ public:
 
 RequestError CommandManager::Cmd_Help(CommandContext& ctx)
 {
-    char category[MAX_ROUTE] = {};
-    char command[MAX_ROUTE]  = {};
-
-    RETURN_IF_ERROR(ctx.readArgs(
-        Optional("category", category,
-                 "Limit the answer to one category, e.g. 'partition'. Omit it to list "
-                 "every category and its commands."),
-        Optional("command",  command,
-                 "Describe this one command's arguments. Needs 'category' as well, "
-                 "because a route is two words.")
-    ));
+    const char* category = ctx.arg(listCategoryArg);
+    const char* command  = ctx.arg(listCommandArg);
 
     if (command[0] != '\0')
         return DescribeCommand(category, command, ctx.reply);
@@ -290,13 +317,7 @@ bool CommandManager::DescribeArguments(const CommandEntry& entry, ReplyArray& ar
 
 RequestError CommandManager::Cmd_Describe(CommandContext& ctx)
 {
-    char category[MAX_ROUTE] = {};
-
-    RETURN_IF_ERROR(ctx.readArgs(
-        Optional("category", category,
-                 "Describe only this category's commands. Omit it for the whole "
-                 "registry, which is the usual call.")
-    ));
+    const char* category = ctx.arg(describeCategoryArg);
 
     // Held across the whole reply, for the same reason ListCategories holds it — and
     // with one addition: every handler on the chain is re-dispatched from in here.
