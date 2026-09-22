@@ -1,6 +1,6 @@
 #include "CommandManager.h"
-#include "EnvelopeLine.h"
-#include "JsonReplyWriter.h"
+#include "Envelope.h"
+#include "ReplyWriter.h"
 #include "Stream.h"
 #include "esp_log.h"
 #include <cstdio>
@@ -26,7 +26,7 @@ void CommandManager::Init()
     ESP_LOGI(TAG, "Initialized");
 }
 
-CommandResult CommandManager::Execute(EnvelopeLine& envelope, Stream& in, Stream& out,
+CommandResult CommandManager::Execute(Envelope& envelope, ReplyWriter& reply, Stream& in,
                                       ConnectionAuth* connection,
                                       const char** failedArg)
 {
@@ -53,8 +53,7 @@ CommandResult CommandManager::Execute(EnvelopeLine& envelope, Stream& in, Stream
         }
     }
 
-    JsonReplyWriter writer(out);
-    CommandContext ctx(writer, in, e->args, values, connection);
+    CommandContext ctx(reply, in, e->args, values, connection);
     return e->handler(e->ctx, ctx);
 }
 

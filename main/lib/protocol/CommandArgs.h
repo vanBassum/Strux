@@ -29,6 +29,27 @@
 // decoder below is verified on the host (test/test_command_args.cpp) rather than on
 // a board.
 
+// ─────────────────────────────────────────────────────────────────────────────
+// How big a request may be. Here rather than beside the line reader, because they
+// bound what the decoders below write into and the reader needs a Stream -- which
+// on this project means FreeRTOS, and would put a layer under a header that names
+// none. They are limits on the REQUEST, and the request's layer-free half is this
+// file.
+namespace protocol
+{
+    // The envelope line, bounding the request but NOT the body - bodies stream.
+    //
+    // ONE constant, because there used to be two. The router had 128 and the
+    // argument reader had 512, so a command could declare arguments that made an
+    // envelope it could never be routed with: an envelope whose "type" landed past
+    // byte 127 was refused with a message about the route, for a fault in the
+    // length. Six ordinary arguments were enough to cross it.
+    inline constexpr size_t MAX_ENVELOPE = 512;
+
+    // Command names are short by convention; a longer one simply won't match.
+    inline constexpr size_t MAX_COMMAND_NAME = 32;
+}
+
 /// Ways a REQUEST can be unusable. Closed set, owned by the framework -- anything a
 /// command author wants to add is meaning, and belongs in the reply.
 enum class CommandResult : uint8_t
@@ -357,6 +378,133 @@ inline CommandResult DecodeJsonArgs(char* line, const ArgDesc* const* args,
 
             if (delimiter == '\0' || delimiter == '}') break;
             ++p;
+        }
+    }
+
+    for (int i = 0; args[i] != nullptr; ++i)
+    {
+        if (args[i]->required && !out.has(static_cast<size_t>(i)))
+        {
+            failed = args[i]->name;
+            return CommandResult::MissingArgument;
+        }
+    }
+
+    return CommandResult::Ok;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Console decoding
+//
+// The same declarations, read out of a line a person types:
+//
+//     led set enabled=true
+//     settings set key=device.name value="My Device"
+//
+// It is the JSON decoder's sibling, not a translation of it: both fill the same
+// ArgValues against the same ArgDesc list, and both convert through the same
+// args_detail::Convert, so a type is understood identically whichever codec
+// carried it. What differs is the grammar above the values, which is all a codec
+// should ever differ by.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Split a console line into the command it names and the arguments after it.
+///
+/// The name is every leading token that is NOT `key=value`, which is the whole
+/// rule: `help` is one word, `system ping` is two, and a three-word command would
+/// need no change here. Nothing consults the registry, so this stays a property of
+/// the line rather than of what happens to be registered.
+///
+/// `name` receives the words joined by single spaces -- exactly the form the
+/// registry holds and the wire carries. Returns where the arguments start; `line`
+/// is not modified.
+inline char* SplitConsoleCommand(char* line, char* name, size_t cap)
+{
+    using namespace args_detail;
+
+    size_t written = 0;
+    name[0] = '\0';
+
+    char* p = line;
+    while (true)
+    {
+        while (IsSpace(*p)) ++p;
+        if (*p == '\0') break;
+
+        char* start = p;
+        while (*p != '\0' && !IsSpace(*p) && *p != '=') ++p;
+        if (*p == '=') { p = start; break; }   // an argument: the name ended before it
+
+        const size_t len = static_cast<size_t>(p - start);
+        // One space between words, and none before the first.
+        const size_t need = (written == 0 ? 0 : 1) + len;
+        if (written + need >= cap) { name[0] = '\0'; return line; }   // too long to be a name
+
+        if (written != 0) name[written++] = ' ';
+        memcpy(name + written, start, len);
+        written += len;
+        name[written] = '\0';
+    }
+
+    return p;
+}
+
+/// Decode `key=value` arguments out of a console line's argument region.
+///
+/// `p` is what SplitConsoleCommand returned, NUL-terminated and modified in place;
+/// decoded strings point into it, so nothing is copied and nothing is owned. An
+/// undeclared key is IGNORED, exactly as the JSON decoder ignores one -- the two
+/// codecs must not disagree about what an unknown argument means.
+inline CommandResult DecodeConsoleArgs(char* p, const ArgDesc* const* args,
+                                       ArgValues& out, const char*& failed)
+{
+    using namespace args_detail;
+
+    failed = nullptr;
+
+    while (*p != '\0')
+    {
+        while (IsSpace(*p)) ++p;
+        if (*p == '\0') break;
+
+        char* key = p;
+        while (*p != '\0' && *p != '=' && !IsSpace(*p)) ++p;
+        // A bare word here is not an argument. Deliberately refused rather than
+        // guessed at: a flag form would have to decide which declaration it meant.
+        if (*p != '=') return CommandResult::MalformedRequest;
+
+        const size_t keyLen = static_cast<size_t>(p - key);
+        const int slot = Match(args, key, keyLen);
+        ++p;   // past '='
+
+        char*  value = p;
+        size_t len   = 0;
+
+        if (*p == '"')
+        {
+            value = ++p;
+            while (*p != '\0' && *p != '"') { if (*p == '\\' && p[1] != '\0') ++p; ++p; }
+            if (*p != '"') return CommandResult::MalformedRequest;
+            char* end = p;
+            ++p;                       // past the closing quote
+            len = Unescape(value, end);   // terminates at or before it
+        }
+        else
+        {
+            while (*p != '\0' && !IsSpace(*p)) ++p;
+            len = static_cast<size_t>(p - value);
+            // The delimiter is read before it is overwritten, because the value
+            // needs a terminator and the scan needs to know where to resume.
+            const char delimiter = *p;
+            *p = '\0';
+            if (delimiter != '\0') ++p;
+        }
+
+        if (slot >= 0)
+        {
+            const CommandResult e = Convert(*args[slot], static_cast<size_t>(slot),
+                                            value, len, out);
+            if (e != CommandResult::Ok) { failed = args[slot]->name; return e; }
         }
     }
 

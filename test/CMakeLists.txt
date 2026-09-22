@@ -17,6 +17,7 @@ add_executable(strux-host-tests
     main.cpp
     test_channel_protocol.cpp
     test_command_args.cpp
+    test_console_args.cpp
     test_channel_table.cpp
     test_connection_state.cpp
 )

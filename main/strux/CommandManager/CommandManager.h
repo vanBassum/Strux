@@ -11,7 +11,8 @@
 #include <initializer_list>
 
 class Stream;
-class EnvelopeLine;
+class Envelope;
+class ReplyWriter;
 
 // Pure dispatcher — knows no other managers, and no commands but the
 // registry's own (`help`, which is the registry describing itself and
@@ -20,10 +21,10 @@ class EnvelopeLine;
 // Init().
 //
 // Deliberately knows nothing about channels, transports or the wire format: give
-// it a read envelope and a stream and it runs the handler. It asks the envelope for
-// a name and for a decode against the command's declarations, so the ONE place that
-// knows a request is JSON is EnvelopeLine — which is what keeps this the one piece
-// of the request path that can be reasoned about on its own.
+// it an envelope, a reply writer and a stream and it runs the handler. It asks the
+// envelope for a name and for a decode against the command's declarations, so no
+// codec's syntax is visible from here — JSON and the console line reach this same
+// function and leave through the same ReplyWriter.
 //
 // Reading a request's envelope is the protocol layer's job — see
 // protocol::RunCommandChannel, which every transport calls.
@@ -78,16 +79,19 @@ public:
     }
 
     /// Run the command the envelope names. `in` is positioned at the request body
-    /// (empty for most commands) and the handler writes its reply to `out`.
+    /// (empty for most commands) and the handler writes its reply through `reply`.
     ///
-    /// The envelope arrives already read — the interface built it, because reading it
-    /// is what leaves `in` at the body — and is asked to decode this command's
-    /// declared arguments. Nothing here names a wire format.
+    /// BOTH halves arrive already chosen, because both belong to the codec that
+    /// carried the request and this class has no way to know which that was. The
+    /// envelope was read by the interface — reading it is what leaves `in` at the
+    /// body — and is asked to decode this command's declared arguments; the writer
+    /// is that same codec's. Nothing here names a wire format, and adding a second
+    /// one changed neither this signature's meaning nor a single handler.
     ///
     /// Returns Ok, UnknownCommand, or whatever the decode reported. `failedArg` (when
     /// non-null) receives the argument name a failure was about, so the caller can
     /// compose the refusal text.
-    CommandResult Execute(EnvelopeLine& envelope, Stream& in, Stream& out,
+    CommandResult Execute(Envelope& envelope, ReplyWriter& reply, Stream& in,
                           ConnectionAuth* connection = nullptr,
                           const char** failedArg = nullptr);
 
