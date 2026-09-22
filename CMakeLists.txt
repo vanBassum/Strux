@@ -40,19 +40,34 @@ endif()
 add_compile_definitions(STRUX_GIT_COMMIT="${GIT_COMMIT}")
 
 # ── Per-board sdkconfig ───────────────────────────────────────
-# Common defaults plus an optional per-board overlay living in the board
-# folder (main/hardware/boards/<board>/sdkconfig.defaults), letting a board
-# change flash size / PSRAM / partitions without touching the shared
-# defaults. sdkconfig fragments cannot include one another, so this list is
-# the composition point: the board file overlays the common one and wins on
-# conflicts. BOARD is the same cache var consumed by main/CMakeLists.txt.
+# The application's defaults plus the board's own, in that order. sdkconfig
+# fragments cannot include one another, so this list is the composition point:
+# the board file overlays the shared one and wins on conflicts.
+#
+# The board file is REQUIRED, not optional. It carries the hardware — flash
+# size, flash timing, partition table, console routing, PSRAM — and a board
+# that silently had none would inherit ESP-IDF's idea of those instead, which
+# for flash size is 2 MB on an ESP32 and would produce a wrongly sized image
+# rather than an error. There is nothing a board could leave to the defaults
+# that is worth that failure mode, so a missing file is a build error naming
+# what it is for. BOARD is the same cache var consumed by main/CMakeLists.txt.
 if(NOT DEFINED BOARD)
     set(BOARD "esp32_devkit")
 endif()
-set(SDKCONFIG_DEFAULTS "sdkconfig.defaults")
-if(EXISTS "${CMAKE_SOURCE_DIR}/main/hardware/boards/${BOARD}/sdkconfig.defaults")
-    list(APPEND SDKCONFIG_DEFAULTS "main/hardware/boards/${BOARD}/sdkconfig.defaults")
+set(_strux_board_defaults "main/hardware/boards/${BOARD}/sdkconfig.defaults")
+if(NOT EXISTS "${CMAKE_SOURCE_DIR}/${_strux_board_defaults}")
+    file(GLOB _strux_boards RELATIVE "${CMAKE_SOURCE_DIR}/main/hardware/boards"
+         "${CMAKE_SOURCE_DIR}/main/hardware/boards/*")
+    message(FATAL_ERROR
+        "Board '${BOARD}' has no ${_strux_board_defaults}.\n\n"
+        "Every board declares its own hardware there — flash size and timing, the "
+        "partition table it names, console routing, PSRAM. The shared "
+        "sdkconfig.defaults holds what the APPLICATION needs and deliberately "
+        "asserts none of those, so without this file the build would take "
+        "ESP-IDF's defaults for them and produce a wrongly sized image.\n\n"
+        "Available boards: ${_strux_boards}")
 endif()
+set(SDKCONFIG_DEFAULTS "sdkconfig.defaults" "${_strux_board_defaults}")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.

@@ -1,4 +1,9 @@
-# ESP-IDF Partition Table
+# ESP-IDF Partition Table — ESP32 DevKit (ESP32-WROOM-32, 4 MB flash)
+#
+# This board's layout, not the project's. The application asks only for nvs,
+# otadata, phy_init and two app slots; how big they are is a property of this
+# flash, which is why the file lives here and the board's sdkconfig.defaults
+# names it.
 #
 # No www partition: the built frontend is packed into one blob and linked into
 # the app image (main/strux/WebAssets/), so a firmware image is the whole product
