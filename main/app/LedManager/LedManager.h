@@ -85,12 +85,7 @@ private:
     RequestError Cmd_Get(CommandContext& ctx);
     RequestError Cmd_Set(CommandContext& ctx);
 
-    inline static CommandEntry commands_[] = {
-        { "led", "get", &InvokeCommand<&LedManager::Cmd_Get>,
-          "Report the indicator: whether it is enabled, whether the relay link is up, "
-          "and whether the LED is lit right now." },
-        { "led", "set", &InvokeCommand<&LedManager::Cmd_Set>,
-          "Turn the relay-link indicator on or off. Persisted, so it survives a "
-          "reboot. Omitting 'enabled' leaves it as it is and just reports the state." },
-    };
+    /// Defined in LedManager.cpp, beside the handlers and the argument they read.
+    /// The bound is the entry count.
+    static CommandEntry commands_[2];
 };

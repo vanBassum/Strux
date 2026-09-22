@@ -63,6 +63,25 @@ void LedManager::Apply()
 // alike, because a handler serves neither — it serves a CommandContext.
 // ──────────────────────────────────────────────────────────────
 
+namespace {
+
+constexpr CommandArg<bool> enabledArg{
+    "enabled", "true lights the LED while the relay link is up; false keeps the "
+               "board dark. Absent leaves the current setting alone.",
+    Presence::Optional };
+
+} // namespace
+
+CommandEntry LedManager::commands_[2] = {
+    { "led", "get", &InvokeCommand<&LedManager::Cmd_Get>,
+      "Report the indicator: whether it is enabled, whether the relay link is up, "
+      "and whether the LED is lit right now." },
+    { "led", "set", &InvokeCommand<&LedManager::Cmd_Set>,
+      "Turn the relay-link indicator on or off. Persisted, so it survives a "
+      "reboot. Omitting 'enabled' leaves it as it is and just reports the state.",
+      { &enabledArg } },
+};
+
 RequestError LedManager::Cmd_Get(CommandContext& ctx)
 {
     RETURN_IF_ERROR(ctx.readArgs());
@@ -76,15 +95,11 @@ RequestError LedManager::Cmd_Get(CommandContext& ctx)
 
 RequestError LedManager::Cmd_Set(CommandContext& ctx)
 {
-    // "Absent means leave it alone" needs no has() here: the destination starts at the
-    // current state, so an Optional the caller omitted simply writes itself back.
-    bool enabled = enabled_.Get();
-
-    RETURN_IF_ERROR(ctx.readArgs(
-        Optional("enabled", enabled,
-                 "true lights the LED while the relay link is up; false keeps the "
-                 "board dark. Absent leaves the current setting alone.")
-    ));
+    // "Absent means leave it alone" is the one place has() earns itself: an omitted
+    // optional bool decodes as false, which would turn the indicator OFF rather than
+    // leave it. The destination no longer belongs to the handler, so the fallback has
+    // to be written rather than left standing in an initialiser.
+    const bool enabled = ctx.has(enabledArg) ? ctx.arg(enabledArg) : enabled_.Get();
 
     SetEnabled(enabled);
 
