@@ -21,6 +21,10 @@ interface PendingRequest {
   // by a newline in the BYTES, so this fires the same way whatever size the
   // transport framed in.
   onMessage?: (msg: Record<string, unknown>) => void
+  // Called for each completed record as its TEXT, before onMessage parses it. A
+  // caller that has no type for the reply — the command console — still wants a
+  // record that is not JSON, which onMessage drops.
+  onRecord?: (text: string) => void
   // The caller expects a declared body (a header record with contentType, then
   // bytes). Resolves with { header, body } instead of the parsed record.
   wantsBody?: boolean
@@ -464,6 +468,7 @@ class BackendService {
     opts: {
       timeoutMs?: number
       onMessage?: (msg: Record<string, unknown>) => void
+      onRecord?: (text: string) => void
       wantsBody?: boolean
       wantsRaw?: boolean
       onData?: (received: number) => void
@@ -484,6 +489,7 @@ class BackendService {
         timeoutMs,
         reader: new ReplyReader(),
         onMessage: opts.onMessage,
+        onRecord: opts.onRecord,
         wantsBody: opts.wantsBody,
         wantsRaw: opts.wantsRaw,
         onData: opts.onData,
@@ -524,13 +530,14 @@ class BackendService {
    *  write flash. */
   async execute(
     envelope: Record<string, unknown>,
-    opts: { timeoutMs?: number } = {},
+    opts: { timeoutMs?: number; onRecord?: (text: string) => void } = {},
   ): Promise<ReplyResult> {
     return this.enqueue(async () => {
       await this.ensureConnected()
       const session = this.allocSession()
       const reply = this.awaitReply<ReplyResult>(session, {
         timeoutMs: opts.timeoutMs ?? 30000,
+        onRecord: opts.onRecord,
         wantsRaw: true,
       })
       const request = new TextEncoder().encode(JSON.stringify(envelope) + "\n")
@@ -635,6 +642,7 @@ class BackendService {
     this.bumpTimer(session)
 
     for (const text of records) {
+      req.onRecord?.(text)
       if (!req.onMessage) continue
       try {
         req.onMessage(JSON.parse(text))
@@ -698,6 +706,15 @@ class BackendService {
 
   async getUpdateStatus(): Promise<UpdateStatus> {
     return this.send<UpdateStatus>("partition status")
+  }
+
+  /** The device's whole command registry, in one reply.
+   *
+   *  This is the device describing ITSELF — names, descriptions and argument
+   *  declarations — so nothing here is a list this file maintains. The command
+   *  console is built entirely out of what this returns. */
+  async describeCommands(): Promise<CommandRegistry> {
+    return this.send<CommandRegistry>("help", {}, { timeoutMs: 20000 })
   }
 
   async getSettings(): Promise<SettingsResponse> {
@@ -1118,3 +1135,37 @@ export interface PartitionsResponse {
   partitions: Partition[]
 }
 
+// ── Command self-description (`help`) ────────────────────────────
+//
+// The shape the device answers with, transcribed and nothing more. No command
+// name appears anywhere below, deliberately: everything the console knows about
+// a command it learned at runtime from this reply.
+
+/** The argument types `ArgTypeName` reports. */
+export type CommandArgType = "string" | "uint32" | "int32" | "float" | "bool"
+
+/** One declared argument of one command. */
+export interface CommandArgDesc {
+  name: string
+  type: CommandArgType
+  required: boolean
+  /** Strings only: the length at which the device refuses a value. */
+  maxLength?: number
+  /** Absent when the command did not describe it — which is not the same as an
+   *  empty description, and is worth showing differently. */
+  description?: string
+}
+
+export interface CommandDesc {
+  /** The command exactly as the wire carries it: `partition write`. */
+  name: string
+  description?: string
+  arguments: CommandArgDesc[]
+}
+
+/** Every command the device has, flat. The registry says nothing about grouping,
+ *  because grouping is a question about a command rather than part of it. */
+export interface CommandRegistry {
+  ok: boolean
+  commands: CommandDesc[]
+}

@@ -18,8 +18,12 @@ values plus `ctx.in` positioned at the body; and the reply is the structured
 frames. A command has ONE identity (`partition write`), the wire's own. `help` reads
 metadata and executes nothing.
 
-Proven on the bench devkit throughout: `help describe` for all 24 commands is
-byte-identical to the capture taken before any of it.
+`help` is now ONE command answering ONE flat list — every command's full name, its
+description and its argument declarations. The category tree it used to report was a
+shape the registry never had (a category is the first word of a name, derived where
+it is needed), and `help list` existed only to walk that tree, so both went. Proven on
+the bench devkit: 23 commands, each one's declarations identical to the capture taken
+before any of it.
 
 Two things deliberately NOT done, and tracked as issues rather than folded in:
 [#42](https://github.com/vanBassum/Strux/issues/42) (stale `partition write` prose),
@@ -29,7 +33,7 @@ itself) and [#44](https://github.com/vanBassum/Strux/issues/44) (`\n` decodes as
 letter `n`; `args_detail::Unescape` replicates it byte for byte on purpose).
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
-carry a one-line description and describe each argument; `help describe` returns the
+carry a one-line description and describe each argument; `help` returns the
 whole registry in one reply and `system describe` returns the product's own description
 and instructions (`main/app/DeviceDoc.h`). The relay exposes three generic tools at
 `/mcp` — `devices`, `describe`, `execute` — gated by a per-device switch on its
@@ -57,10 +61,11 @@ feed both work. What is left needs eyes and a second machine:
 - **A browser at every width, now in both themes** — the sidebar surviving, and the
   redesigned Settings page (two-column card grid, category chip row) laying out as
   intended. The sidebar header's new system/light/dark toggle is the first thing ever to
-  put the `.dark` tokens in play, so every page needs one dark look. The new Commands
-  page joins this: its four reply shapes are proven on the wire against the bench devkit
-  (a plain record, a 7.9 KB record split over two frames, an `ok:false` refusal, and a
-  declared `text/html` body), but nothing has looked at how it renders them.
+  put the `.dark` tokens in play, so every page needs one dark look. The Commands page is
+  now a generated console — it discovers commands from `help`, builds controls from each
+  argument's declaration, and traces the reply record by record — and has been driven in a
+  real browser against the bench devkit at 1400px in the light theme. Dark, and anything
+  narrower than `md` (where the list and the form stack), have not been looked at.
 - **The relay path** — `relay.url` on the bench devkit points at
   `ws://192.168.50.109:8080/device`, which refuses the connection, so the relay has
   never served this build. (A *second* C3, `esp32-50787d83db6c`, has been driven through
