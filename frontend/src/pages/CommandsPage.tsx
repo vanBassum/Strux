@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState } from "react"
+import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import { SendIcon, SquareTerminalIcon, TrashIcon } from "lucide-react"
 
+import { CommandSuggestions } from "@/components/CommandSuggestions"
 import { Button } from "@/components/ui/button"
 import { useCommands } from "@/hooks/use-commands"
 import { backend } from "@/lib/backend"
-import { complete, matchCommand, signature } from "@/lib/commandline"
+import { matchCommand, signature, suggest, type Suggestion } from "@/lib/commandline"
 
 /**
  * Running commands, the old-school way: type a line, read the answer.
@@ -16,52 +17,69 @@ import { complete, matchCommand, signature } from "@/lib/commandline"
  * (main/lib/protocol/ConsoleEnvelope.h and YamlReplyWriter.h), and the browser
  * is simply a second client of it.
  *
- * The registry is used, and only for the prompt: Tab completes a command name,
- * then an argument name, then a bool's value, all off `help` at runtime. That is
- * an offer and never a rewrite — a line the registry has never heard of is sent
- * exactly as typed, and the device is what refuses it. So adding a command to
- * the firmware adds it here, and this page still holds no list of its own.
+ * The registry is used, and only for the prompt: the popup above the input
+ * offers commands, then that command's arguments, then a bool's values, with
+ * whatever the device declared about each beside it. It is assistance and never
+ * a rewrite — a line the registry has never heard of is sent exactly as typed,
+ * and the device is what refuses it. So adding a command to the firmware adds it
+ * here, and this page holds no list of its own.
  *
  * NOT the Console. That page is the device's stdout — lines it printed without
  * being asked — and the two are kept apart on purpose: a reply belongs next to
  * the request that asked for it, and a log line belongs to nothing.
  */
 
-/** Scrollback. Old rows keep their whole text, so this is a memory bound as much
- *  as a scrollback one. */
-const MAX_ROWS = 500
+/** Scrollback, in exchanges. Each keeps its whole text, so this is a memory
+ *  bound as much as a scrollback one. */
+const MAX_EXCHANGES = 200
 
-/** How much of one record is drawn. `partition read` answers in megabytes, and a
- *  megabyte of text in the DOM hangs the tab. */
+/** Lines of one record drawn before it is folded. Enough for an ordinary reply
+ *  whole, short enough that `help` does not bury the prompt. */
+const FOLD_AFTER = 14
+
+/** How much of one record is kept at all. `partition read` answers in megabytes,
+ *  and a megabyte of text in the DOM hangs the tab. */
 const RECORD_LIMIT = 32 * 1024
 
-type Kind = "out" | "in" | "error"
-
-interface Row {
+interface Exchange {
   id: number
   at: Date
-  kind: Kind
-  text: string
-  /** Elapsed round trip, on the row that completed a command. */
-  meta?: string
+  /** The line as sent. */
+  command: string
+  /** Reply records, in order, as they arrive. */
+  records: string[]
+  /** A refusal that never became a record: RESET, a timeout, a dropped socket. */
+  error?: string
+  elapsedMs?: number
 }
 
-let nextRowId = 1
+let nextId = 1
 
 export default function CommandsPage() {
   const { commands } = useCommands()
-  const [rows, setRows] = useState<Row[]>([])
+  const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
-  const [options, setOptions] = useState<string[]>([])
+  const [selected, setSelected] = useState(0)
+  const [dismissed, setDismissed] = useState(false)
   const history = useRef<string[]>([])
   const historyAt = useRef(-1)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  function append(row: Omit<Row, "id" | "at">) {
-    setRows((prev) =>
-      [...prev, { ...row, id: nextRowId++, at: new Date() }].slice(-MAX_ROWS),
-    )
+  const suggestions = useMemo(
+    () => (dismissed ? [] : suggest(input, commands)),
+    [dismissed, input, commands],
+  )
+  const current = matchCommand(input, commands)
+
+  function edit(line: string) {
+    setInput(line)
+    setSelected(0)
+    setDismissed(false)
+  }
+
+  function update(id: number, change: (e: Exchange) => Exchange) {
+    setExchanges((prev) => prev.map((e) => (e.id === id ? change(e) : e)))
   }
 
   async function run() {
@@ -71,80 +89,81 @@ export default function CommandsPage() {
     history.current = [...history.current.filter((h) => h !== line), line]
     historyAt.current = -1
     setInput("")
-    setOptions([])
-    append({ kind: "out", text: line })
+    setDismissed(false)
     setBusy(true)
+
+    const id = nextId++
+    setExchanges((prev) =>
+      [...prev, { id, at: new Date(), command: line, records: [] }].slice(-MAX_EXCHANGES),
+    )
 
     const started = performance.now()
     try {
       const reply = await backend.runConsole(line, {
         // Records completed before the last one, as they arrive: a command that
         // reports progress is watched rather than summarised at the end.
-        onRecord: (text) => append({ kind: "in", text: clip(text) }),
+        onRecord: (text) =>
+          update(id, (e) => ({ ...e, records: [...e.records, clip(text)] })),
       })
-      const elapsed = `${Math.round(performance.now() - started)} ms`
+      const elapsedMs = Math.round(performance.now() - started)
 
       // The records already seen came through onRecord; only the last is new.
-      // A reply that declared a body has none left — its header WAS that last
-      // record, and everything after the divider is bytes.
-      const last = reply.body === null ? reply.records.at(-1) : undefined
-      if (last !== undefined) append({ kind: "in", text: clip(last), meta: elapsed })
+      // A reply that declared a body has none left over — its header WAS that
+      // last record, and everything after the divider is bytes.
+      const tail =
+        reply.body === null
+          ? reply.records.slice(-1).map(clip)
+          : [
+              `<${reply.body.length} bytes of ${reply.contentType}` +
+                `${reply.contentEncoding ? `, ${reply.contentEncoding}` : ""}>`,
+            ]
 
-      if (reply.body)
-        append({
-          kind: "in",
-          text:
-            `<${reply.body.length} bytes of ${reply.contentType}` +
-            `${reply.contentEncoding ? `, ${reply.contentEncoding}` : ""}>`,
-          meta: elapsed,
-        })
-
-      if (reply.records.length === 0 && !reply.body)
-        append({ kind: "in", text: "(no reply)", meta: elapsed })
+      update(id, (e) => ({ ...e, records: [...e.records, ...tail], elapsedMs }))
     } catch (e) {
       // A RESET carries the device's reason — an unknown command, a missing
       // argument, `busy`. A timeout and a dropped socket arrive the same way,
       // and all three are the device's answer as much as a record would be.
-      append({
-        kind: "error",
-        text: e instanceof Error ? e.message : "Failed",
-        meta: `${Math.round(performance.now() - started)} ms`,
-      })
+      update(id, (x) => ({
+        ...x,
+        error: e instanceof Error ? e.message : "Failed",
+        elapsedMs: Math.round(performance.now() - started),
+      }))
     } finally {
       setBusy(false)
       inputRef.current?.focus()
     }
   }
 
+  function accept(suggestion: Suggestion) {
+    edit(suggestion.line)
+    inputRef.current?.focus()
+  }
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    const open = suggestions.length > 0
+
     if (e.key === "Tab") {
       e.preventDefault()
-      const { line, options: offered } = complete(input, commands)
-      setInput(line)
-      setOptions(offered.length > 1 ? offered : [])
+      if (open) accept(suggestions[Math.min(selected, suggestions.length - 1)])
       return
     }
 
-    if (e.key === "l" && e.ctrlKey) {
+    if (e.key === "Escape") {
       e.preventDefault()
-      setRows([])
+      setDismissed(true)
       return
     }
 
-    if (e.key === "c" && e.ctrlKey) {
-      // A shell's Ctrl+C on a prompt: abandon the line. The device is
-      // single-in-flight and will still answer whatever is running — this stops
-      // waiting for it, it does not reach across and stop the device.
-      e.preventDefault()
-      if (input) append({ kind: "out", text: `${input}^C` })
-      setInput("")
-      setOptions([])
-      return
-    }
-
+    // The popup borrows the arrows while it is open, the way a shell's
+    // completion menu does; history has them the rest of the time.
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      if (history.current.length === 0) return
       e.preventDefault()
+      if (open) {
+        const step = e.key === "ArrowDown" ? 1 : -1
+        setSelected((at) => (at + step + suggestions.length) % suggestions.length)
+        return
+      }
+      if (history.current.length === 0) return
       const at =
         e.key === "ArrowUp"
           ? Math.min(historyAt.current + 1, history.current.length - 1)
@@ -155,10 +174,25 @@ export default function CommandsPage() {
           ? ""
           : history.current[history.current.length - 1 - historyAt.current],
       )
+      setDismissed(true)   // recalling a line is not a request to complete it
+      return
+    }
+
+    if (e.key === "l" && e.ctrlKey) {
+      e.preventDefault()
+      setExchanges([])
+      return
+    }
+
+    if (e.key === "c" && e.ctrlKey) {
+      // A shell's Ctrl+C on a prompt: abandon the line. The device is
+      // single-in-flight and will still answer whatever is running — this stops
+      // waiting for it, it does not reach across and stop the device.
+      e.preventDefault()
+      setInput("")
+      setDismissed(false)
     }
   }
-
-  const current = matchCommand(input, commands)
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -173,29 +207,30 @@ export default function CommandsPage() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => setRows([])}
-          disabled={rows.length === 0}
+          onClick={() => setExchanges([])}
+          disabled={exchanges.length === 0}
         >
           <TrashIcon className="mr-1.5 size-3.5" />
           Clear
         </Button>
       </div>
 
-      <Transcript rows={rows} />
-
-      {/* What the registry knows about the line so far. An offer, never a rule:
-          the device is what decides whether a line is a command. */}
-      <div className="h-5 shrink-0 truncate px-1 font-mono text-xs text-muted-foreground">
-        {options.length > 0 ? options.join("  ") : current ? signature(current) : ""}
-      </div>
+      <Transcript exchanges={exchanges} />
 
       <form
-        className="flex shrink-0 items-center gap-2"
+        className="relative flex shrink-0 items-center gap-2"
         onSubmit={(e) => {
           e.preventDefault()
           void run()
         }}
       >
+        <CommandSuggestions
+          suggestions={suggestions}
+          selected={Math.min(selected, Math.max(suggestions.length - 1, 0))}
+          onSelect={setSelected}
+          onAccept={accept}
+        />
+
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
           <span className="shrink-0 font-mono text-sm text-muted-foreground select-none">
             &gt;
@@ -203,10 +238,7 @@ export default function CommandsPage() {
           <input
             ref={inputRef}
             value={input}
-            onChange={(e) => {
-              setInput(e.target.value)
-              setOptions([])
-            }}
+            onChange={(e) => edit(e.target.value)}
             onKeyDown={onKeyDown}
             spellCheck={false}
             autoComplete="off"
@@ -222,16 +254,31 @@ export default function CommandsPage() {
         </Button>
       </form>
 
-      <p className="shrink-0 px-1 text-xs text-muted-foreground">
-        <Key>↑ ↓</Key> history <Key>Tab</Key> autocomplete <Key>Ctrl+L</Key> clear{" "}
-        <Key>Ctrl+C</Key> cancel
+      <p className="flex shrink-0 flex-wrap items-baseline gap-x-3 px-1 text-xs text-muted-foreground">
+        <span>
+          <Key>↑ ↓</Key> {suggestions.length > 0 ? "suggestions" : "history"}
+        </span>
+        <span>
+          <Key>Tab</Key> accept
+        </span>
+        <span>
+          <Key>Esc</Key> dismiss
+        </span>
+        <span>
+          <Key>Ctrl+L</Key> clear
+        </span>
+        {/* The signature of whatever the line names, when the popup is not
+            already saying it. */}
+        {suggestions.length === 0 && current && (
+          <span className="ml-auto truncate font-mono">{signature(current)}</span>
+        )}
       </p>
     </div>
   )
 }
 
 function Key({ children }: { children: React.ReactNode }) {
-  return <span className="ml-3 font-mono text-foreground first:ml-0">{children}</span>
+  return <span className="font-mono text-foreground">{children}</span>
 }
 
 /**
@@ -241,14 +288,14 @@ function Key({ children }: { children: React.ReactNode }) {
  * not: scrolling up to read what a command did twenty lines ago should not be
  * undone by the next reply landing.
  */
-function Transcript({ rows }: { rows: Row[] }) {
+function Transcript({ exchanges }: { exchanges: Exchange[] }) {
   const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
   useLayoutEffect(() => {
     const el = ref.current
     if (el && pinned.current) el.scrollTop = el.scrollHeight
-  }, [rows])
+  }, [exchanges])
 
   return (
     <div
@@ -257,56 +304,91 @@ function Transcript({ rows }: { rows: Row[] }) {
         const el = e.currentTarget
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
       }}
-      className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-muted/30 py-1 font-mono text-xs"
+      className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-muted/30 py-2 font-mono text-xs"
     >
-      {rows.length === 0 ? (
-        <p className="px-3 py-2 text-muted-foreground">
+      {exchanges.length === 0 ? (
+        <p className="px-3 py-1 text-muted-foreground">
           Nothing run yet. Type <span className="text-foreground">help</span> to see
           what this device can do.
         </p>
       ) : (
-        rows.map((row) => <Line key={row.id} row={row} />)
+        exchanges.map((exchange) => <Entry key={exchange.id} exchange={exchange} />)
       )}
     </div>
   )
 }
 
-function Line({ row }: { row: Row }) {
+/** One command and its answer, as one block with a blank line under it — so the
+ *  eye lands on a command together with what it said, rather than on whichever
+ *  two lines happen to be adjacent. */
+function Entry({ exchange }: { exchange: Exchange }) {
   return (
-    <div className="flex items-baseline gap-2 px-3 leading-5 hover:bg-muted/60">
-      <span className="w-[6.5rem] shrink-0 text-muted-foreground tabular-nums">
-        {stamp(row.at)}
-      </span>
-      <span className="w-8 shrink-0 select-none">
-        <Badge kind={row.kind} />
-      </span>
-      <pre
-        className={`min-w-0 flex-1 whitespace-pre-wrap ${
-          row.kind === "error" ? "text-destructive" : ""
-        }`}
-      >
-        {row.text}
-      </pre>
-      {row.meta && (
-        <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-          {row.meta}
-        </span>
+    <div className="mb-3 last:mb-0">
+      <Row at={exchange.at} meta={exchange.elapsedMs}>
+        <span className="text-muted-foreground select-none">&gt; </span>
+        <span className="text-blue-600 dark:text-blue-400">{exchange.command}</span>
+      </Row>
+
+      {exchange.records.map((record, i) => (
+        <Record key={i} at={exchange.at} text={record} />
+      ))}
+
+      {exchange.error && (
+        <Row at={exchange.at}>
+          <span className="text-destructive">{exchange.error}</span>
+        </Row>
       )}
     </div>
   )
 }
 
-function Badge({ kind }: { kind: Kind }) {
-  const colors =
-    kind === "out"
-      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
-      : kind === "error"
-        ? "bg-destructive/15 text-destructive"
-        : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+/** One reply record. Folded when it is long, because `help` is the whole
+ *  registry and burying the prompt under it helps nobody. */
+function Record({ at, text }: { at: Date; text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const lines = text.split("\n")
+  const hidden = lines.length - FOLD_AFTER
+
+  if (expanded || hidden <= 0) return <Row at={at}>{text}</Row>
+
   return (
-    <span className={`rounded px-1 py-px text-[0.625rem] font-medium ${colors}`}>
-      {kind === "out" ? "OUT" : "IN"}
-    </span>
+    <>
+      <Row at={at}>{lines.slice(0, FOLD_AFTER).join("\n")}</Row>
+      <Row at={null}>
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          … ({hidden} more)
+        </button>
+      </Row>
+    </>
+  )
+}
+
+/** One line of the transcript, in the columns every other line uses. A stamp of
+ *  null leaves the column empty: a record is one event however many lines it
+ *  takes to write down. */
+function Row({
+  at,
+  meta,
+  children,
+}: {
+  at: Date | null
+  meta?: number
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex items-baseline gap-3 px-3 leading-5">
+      <span className="w-16 shrink-0 text-right text-muted-foreground tabular-nums">
+        {at ? stamp(at) : ""}
+      </span>
+      <pre className="min-w-0 flex-1 whitespace-pre-wrap">{children}</pre>
+      {meta !== undefined && (
+        <span className="shrink-0 text-muted-foreground tabular-nums">{meta} ms</span>
+      )}
+    </div>
   )
 }
 
@@ -315,11 +397,7 @@ function clip(text: string): string {
   return `${text.slice(0, RECORD_LIMIT)}\n… ${text.length - RECORD_LIMIT} more characters`
 }
 
-/** 24-hour clock with milliseconds, which is the resolution a round trip needs. */
 function stamp(at: Date): string {
-  const pad = (v: number, width = 2) => String(v).padStart(width, "0")
-  return (
-    `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}` +
-    `.${pad(at.getMilliseconds(), 3)}`
-  )
+  const pad = (v: number) => String(v).padStart(2, "0")
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`
 }

@@ -1,15 +1,16 @@
-/** Completing a typed console line against the registry the device reported.
+/** Offering the next word of a typed console line, from what the device declared.
  *
  *  What this file is NOT: a parser. The line the terminal types is the line the
  *  device receives, verbatim — the console codec lives in the firmware
  *  (main/lib/protocol/ConsoleEnvelope.h) and nothing here translates a line into
- *  anything else. Every function below only ever offers the next word.
+ *  anything else. Every function below only ever offers, and the offer carries
+ *  the line that accepting it would produce.
  *
- *  Even the offering knows no command: names, argument names and argument types
- *  all come from `help` at runtime.
+ *  Even the offering knows no command: names, argument names, argument types and
+ *  every description come from `help` at runtime.
  */
 
-import type { CommandDesc } from "@/lib/backend"
+import type { CommandArgDesc, CommandDesc } from "@/lib/backend"
 
 /** Split on spaces, except inside quotes, the way the device's decoder does. */
 export function tokenize(input: string): string[] {
@@ -57,31 +58,52 @@ export function matchCommand(
   return best
 }
 
-export interface Completion {
-  /** The line Tab replaces the input with. Unchanged when nothing fits. */
+/** What is being offered. Three kinds, because three things are completable and
+ *  each is worth saying something different about. */
+export type SuggestionKind = "command" | "argument" | "value"
+
+export interface Suggestion {
+  kind: SuggestionKind
+  /** The word offered: `partition write`, `offset`, `true`. */
+  value: string
+  /** The WHOLE input line once this is accepted. Carried rather than computed by
+   *  the caller, because only this file knows where the token being completed
+   *  started. */
   line: string
-  /** Everything that would have fitted, for the strip above the prompt. */
-  options: string[]
+  /** One line about it, when the device declared one. */
+  description?: string
+  /** The command this belongs to — itself, for a command suggestion. */
+  command: CommandDesc
+  /** The argument, for an argument or a value. */
+  arg?: CommandArgDesc
 }
 
-/** What Tab does, and what the prompt offers while you type.
+/**
+ * What the prompt offers for the line so far.
  *
- *  Three things are completable and all three come off the registry: a command
- *  name, an argument name once a command is named, and — for a bool, the one
- *  type with a closed set of values — the value itself. */
-export function complete(input: string, commands: CommandDesc[]): Completion {
+ * Three completable things, all off the registry: a command name, an argument
+ * name once a command is named, and — for a bool, the one type with a closed set
+ * of values — the value itself. Empty when there is nothing to say, which is how
+ * the popup knows to stay out of the way.
+ */
+export function suggest(input: string, commands: CommandDesc[]): Suggestion[] {
   const command = matchCommand(input, commands)
 
   // Still naming the command: the prefix is the WHOLE line, because a name has a
-  // space in it.
+  // space in it. An exactly-typed name still offers itself, so Tab adds the
+  // space that moves on to the arguments.
   if (!command || input.trimStart().length <= command.name.length) {
     const prefix = input.trimStart()
-    const options = commands.map((c) => c.name).filter((n) => n.startsWith(prefix))
-    if (options.length === 0) return { line: input, options: [] }
-    // A name completed exactly gets its trailing space, so the next Tab moves on
-    // to the arguments.
-    const line = options.length === 1 ? `${options[0]} ` : commonPrefix(options)
-    return { line, options }
+    if (prefix === "") return []
+    return commands
+      .filter((c) => c.name.startsWith(prefix))
+      .map((c) => ({
+        kind: "command" as const,
+        value: c.name,
+        line: `${c.name} `,
+        description: c.description,
+        command: c,
+      }))
   }
 
   const token = input.endsWith(" ") ? "" : (tokenize(input).at(-1) ?? "")
@@ -89,11 +111,20 @@ export function complete(input: string, commands: CommandDesc[]): Completion {
 
   const eq = token.indexOf("=")
   if (eq > 0) {
-    const declared = command.arguments.find((a) => a.name === token.slice(0, eq))
-    if (declared?.type !== "bool") return { line: input, options: [] }
-    const options = ["true", "false"].filter((v) => v.startsWith(token.slice(eq + 1)))
-    if (options.length === 0) return { line: input, options: [] }
-    return { line: `${head}${token.slice(0, eq)}=${commonPrefix(options)}`, options }
+    const name = token.slice(0, eq)
+    const arg = command.arguments.find((a) => a.name === name)
+    // Only a bool has a closed set of values. Anything else is the caller's to
+    // know, and guessing at it would be inventing metadata the device never gave.
+    if (arg?.type !== "bool") return []
+    return ["true", "false"]
+      .filter((v) => v.startsWith(token.slice(eq + 1)))
+      .map((v) => ({
+        kind: "value" as const,
+        value: v,
+        line: `${head}${name}=${v}`,
+        command,
+        arg,
+      }))
   }
 
   // Arguments already on the line are not offered again.
@@ -102,21 +133,16 @@ export function complete(input: string, commands: CommandDesc[]): Completion {
       .map((t) => t.slice(0, t.indexOf("=")))
       .filter(Boolean),
   )
-  const options = command.arguments
-    .map((a) => a.name)
-    .filter((n) => !used.has(n) && n.startsWith(token))
-  if (options.length === 0) return { line: input, options: [] }
-
-  const line =
-    options.length === 1 ? `${head}${options[0]}=` : `${head}${commonPrefix(options)}`
-  return { line, options }
-}
-
-function commonPrefix(values: string[]): string {
-  let prefix = values[0]
-  for (const value of values)
-    while (!value.startsWith(prefix)) prefix = prefix.slice(0, -1)
-  return prefix
+  return command.arguments
+    .filter((a) => !used.has(a.name) && a.name.startsWith(token))
+    .map((a) => ({
+      kind: "argument" as const,
+      value: a.name,
+      line: `${head}${a.name}=`,
+      description: a.description,
+      command,
+      arg: a,
+    }))
 }
 
 /** How a command reads above the prompt:

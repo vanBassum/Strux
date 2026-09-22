@@ -1,28 +1,33 @@
 import { describe, expect, it } from "vitest"
 
-import { complete, matchCommand, signature, tokenize } from "./commandline"
+import { matchCommand, signature, suggest, tokenize } from "./commandline"
 import type { CommandDesc } from "./backend"
 
 // A registry shaped like the device's, and small enough to reason about. Nothing
 // under test knows these names — they arrive as data, exactly as `help` delivers
-// them — so this fixture is a stand-in for a build, not a copy of one.
+// them — so this fixture stands in for a build rather than copying one.
 const commands: CommandDesc[] = [
-  { name: "help", arguments: [] },
-  { name: "system ping", arguments: [] },
+  { name: "help", description: "Describe every command.", arguments: [] },
+  { name: "system ping", description: "Check the device answers.", arguments: [] },
   { name: "system info", arguments: [] },
   {
     name: "led set",
-    arguments: [{ name: "enabled", type: "bool", required: false }],
+    description: "Turn the indicator on or off.",
+    arguments: [
+      { name: "enabled", type: "bool", required: false, description: "Light it." },
+    ],
   },
   {
     name: "partition write",
     arguments: [
       { name: "partition", type: "string", required: true, maxLength: 16 },
-      { name: "offset", type: "uint32", required: false },
+      { name: "offset", type: "uint32", required: false, description: "Where." },
     ],
   },
   { name: "partition list", arguments: [] },
 ]
+
+const values = (input: string) => suggest(input, commands).map((s) => s.value)
 
 describe("tokenize", () => {
   it("splits on spaces", () => {
@@ -58,48 +63,63 @@ describe("matchCommand", () => {
   })
 })
 
-describe("complete", () => {
-  it("completes to the common prefix when several fit", () => {
-    const { line, options } = complete("part", commands)
-    expect(line).toBe("partition ")
-    expect(options).toEqual(["partition write", "partition list"])
+describe("suggest", () => {
+  it("offers nothing for an empty line", () => {
+    expect(suggest("", commands)).toEqual([])
   })
 
-  it("completes a single match and moves the cursor on", () => {
-    expect(complete("partition w", commands).line).toBe("partition write ")
+  it("offers the commands a prefix could become", () => {
+    expect(values("part")).toEqual(["partition write", "partition list"])
   })
 
-  it("offers argument names once the command is named", () => {
-    const { line, options } = complete("partition write ", commands)
-    expect(options).toEqual(["partition", "offset"])
-    expect(line).toBe("partition write ")   // no shared prefix to add
+  it("carries the whole line each suggestion would produce", () => {
+    const [first] = suggest("led s", commands)
+    expect(first.value).toBe("led set")
+    expect(first.line).toBe("led set ")
+    expect(first.description).toBe("Turn the indicator on or off.")
   })
 
-  it("completes a single argument name with its equals sign", () => {
-    expect(complete("partition write off", commands).line).toBe(
-      "partition write offset=",
-    )
+  it("still offers an exactly-typed name, so Tab adds the space", () => {
+    expect(suggest("led set", commands)[0].line).toBe("led set ")
+  })
+
+  it("switches to arguments once the command is named", () => {
+    const offered = suggest("partition write ", commands)
+    expect(offered.map((s) => s.value)).toEqual(["partition", "offset"])
+    expect(offered[0].kind).toBe("argument")
+    expect(offered[0].line).toBe("partition write partition=")
+    expect(offered[0].arg?.required).toBe(true)
+    expect(offered[1].description).toBe("Where.")
+  })
+
+  it("narrows arguments by what has been typed", () => {
+    expect(values("partition write off")).toEqual(["offset"])
   })
 
   it("does not offer an argument already on the line", () => {
-    expect(complete("partition write offset=1 ", commands).options).toEqual([
-      "partition",
-    ])
+    expect(values("partition write offset=1 ")).toEqual(["partition"])
   })
 
-  it("completes a bool's value, the one type with a closed set", () => {
-    expect(complete("led set enabled=t", commands).line).toBe("led set enabled=true")
-    expect(complete("led set enabled=", commands).options).toEqual(["true", "false"])
+  it("offers a bool's values, the one type with a closed set", () => {
+    const offered = suggest("led set enabled=", commands)
+    expect(offered.map((s) => s.value)).toEqual(["true", "false"])
+    expect(offered[0].kind).toBe("value")
+    expect(offered[0].line).toBe("led set enabled=true")
+    expect(offered[0].arg?.name).toBe("enabled")
+  })
+
+  it("narrows a bool's values by what has been typed", () => {
+    expect(values("led set enabled=t")).toEqual(["true"])
   })
 
   it("offers nothing for a value whose type has no closed set", () => {
-    expect(complete("partition write partition=o", commands).options).toEqual([])
+    // Inventing candidates here would be inventing metadata the device never
+    // gave — a partition label is exactly the case that would tempt it.
+    expect(suggest("partition write partition=o", commands)).toEqual([])
   })
 
-  it("leaves a line it knows nothing about alone", () => {
-    const { line, options } = complete("zzz", commands)
-    expect(line).toBe("zzz")
-    expect(options).toEqual([])
+  it("offers nothing for a line it knows nothing about", () => {
+    expect(suggest("zzz", commands)).toEqual([])
   })
 })
 

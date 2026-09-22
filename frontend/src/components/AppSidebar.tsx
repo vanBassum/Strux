@@ -35,10 +35,25 @@ import { ThemeToggle } from "@/components/ThemeToggle"
 // you go looking for, not a destination, so they live behind the footer instead of
 // taking a place in the navigation beside the product. See
 // docs/reasoning/2026-09-09-22h00.
+//
+// Two of them carry a `hint`, and only those two: Console and Commands both look
+// like terminals and are not the same thing at all — one is what the device
+// printed, the other is what you asked it. Naming the difference in the nav is
+// cheaper than finding it out by clicking.
 const navItems = [
   { title: "LED", icon: LightbulbIcon, page: "home" as const },
-  { title: "Console", icon: TerminalIcon, page: "console" as const },
-  { title: "Commands", icon: SquareTerminalIcon, page: "commands" as const },
+  {
+    title: "Console",
+    hint: "Device logs (stdout)",
+    icon: TerminalIcon,
+    page: "console" as const,
+  },
+  {
+    title: "Commands",
+    hint: "Run device commands",
+    icon: SquareTerminalIcon,
+    page: "commands" as const,
+  },
   { title: "Settings", icon: SettingsIcon, page: "settings" as const },
   { title: "Firmware", icon: DownloadIcon, page: "firmware" as const },
 ]
@@ -98,9 +113,17 @@ export function AppSidebar({ currentPage, onNavigate }: AppSidebarProps) {
                   <SidebarMenuButton
                     isActive={currentPage === item.page}
                     onClick={() => onNavigate(item.page)}
+                    className={"hint" in item ? "h-auto py-1.5" : undefined}
                   >
                     <item.icon />
-                    <span>{item.title}</span>
+                    <span className="flex min-w-0 flex-col">
+                      <span>{item.title}</span>
+                      {"hint" in item && (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {item.hint}
+                        </span>
+                      )}
+                    </span>
                     {item.page === "firmware" && updateAvailable && (
                       <span className="ml-auto h-2 w-2 rounded-full bg-emerald-500" />
                     )}
