@@ -185,7 +185,7 @@ The console syntax is `<command words> name=value …`: **a command's name is ev
 
 `SplitConsoleCommand` and `DecodeConsoleArgs` live in [CommandArgs.h](main/lib/protocol/CommandArgs.h) beside `DecodeJsonArgs`, and both fill the same `ArgValues` through the same `args_detail::Convert` — so a type means the same thing whichever codec carried it, and both are host-tested (`test/test_console_args.cpp`).
 
-The browser speaks both: the Commands page uses JSON (`backend.execute`), the Console page uses the console codec (`backend.runConsole`), and **nothing in the frontend translates between them** — the line typed in the terminal reaches the device as those bytes.
+**The browser's two terminal-shaped pages are not the same concern, and neither is a codec's demo.** The **Commands** page is the console codec's client (`backend.runConsole`): a typed line, an IN/OUT transcript, Tab completion off `help`, and nothing in the frontend translating a line into anything — what is typed reaches the device as those bytes. The **Console** page is the device's stdout, which is `log list` plus the `log stream` broadcast and has nothing to do with running a command. Every other page (Settings, Firmware, the LED home page) speaks JSON through `backend.send`, which is what keeps the first codec exercised.
 
 **What the second codec exposed, and what had to move for it:**
 

@@ -29,9 +29,10 @@ before any of it.
 starting with `{` is JSON; anything else is the console codec (`led set enabled=true`,
 answered in YAML). `RunCommandChannel` sniffs the line and builds the matching
 `Envelope` + `ReplyWriter` pair; `CommandManager::Execute` takes both as interfaces and
-names no syntax, and not one handler changed. The Console page is a terminal speaking
-it directly — nothing in the browser translates a typed line into an envelope. Proven
-on the bench devkit for every representative shape: a scalar reply, a nested one, a
+names no syntax, and not one handler changed. The **Commands** page is a terminal
+speaking it directly — nothing in the browser translates a typed line into an envelope
+— while the **Console** page stays what it was, the device's stdout. Proven on the
+bench devkit for every representative shape: a scalar reply, a nested one, a
 refusal, a missing required argument, a quoted value, a block scalar
 (`system describe`) and a declared body (`web read`, `partition read`). See the
 **Codecs** section of CLAUDE.md for what it exposed — a record separator turned out to
@@ -75,10 +76,11 @@ feed both work. What is left needs eyes and a second machine:
   redesigned Settings page (two-column card grid, category chip row) laying out as
   intended. The sidebar header's new system/light/dark toggle is the first thing ever to
   put the `.dark` tokens in play, so every page needs one dark look. The Commands page is
-  now a generated console — it discovers commands from `help`, builds controls from each
-  argument's declaration, and traces the reply record by record — and has been driven in a
-  real browser against the bench devkit at 1400px in the light theme. Dark, and anything
-  narrower than `md` (where the list and the form stack), have not been looked at.
+  now a terminal over the console codec and has been driven in a real browser against the
+  bench devkit in both themes; the generated-form version of it was tried and dropped
+  (two pages of it are in git at `1bd03fb`). What has not been looked at is either
+  terminal below `sm`, where the header wraps and the transcript's fixed columns get
+  tight.
 - **The relay path** — `relay.url` on the bench devkit points at
   `ws://192.168.50.109:8080/device`, which refuses the connection, so the relay has
   never served this build. (A *second* C3, `esp32-50787d83db6c`, has been driven through

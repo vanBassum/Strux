@@ -1,321 +1,254 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import {
-  DownloadIcon,
-  PlayIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  SquareTerminalIcon,
-  TrashIcon,
-} from "lucide-react"
+import { useLayoutEffect, useRef, useState } from "react"
+import { SendIcon, SquareTerminalIcon, TrashIcon } from "lucide-react"
 
-import {
-  CommandArgsForm,
-  buildEnvelope,
-  initialValues,
-} from "@/components/CommandArgsForm"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useCommands } from "@/hooks/use-commands"
-import { backend, type CommandDesc } from "@/lib/backend"
-import { toYaml } from "@/lib/yaml"
+import { backend } from "@/lib/backend"
+import { complete, matchCommand, signature } from "@/lib/commandline"
 
 /**
- * The command console: pick a command the device declared, fill in the arguments
- * it declared, run it, read the answer.
+ * Running commands, the old-school way: type a line, read the answer.
  *
- * NOTHING in this page or the files it uses names a command. The list comes from
- * `help`, the controls come from each command's argument declarations,
- * and the reply is rendered as it arrived rather than as a shape this file
- * expected. Adding a command to the firmware therefore adds it here, and a
- * command this build has never seen is as usable as one it ships with.
+ * What is typed here goes to the device as those bytes — `led set enabled=true`
+ * and not an envelope — and what comes back is what the device wrote, which is
+ * YAML because that is the console codec's reply half. Nothing in this file
+ * translates between the two: the codec is in the firmware
+ * (main/lib/protocol/ConsoleEnvelope.h and YamlReplyWriter.h), and the browser
+ * is simply a second client of it.
  *
- * That is the point of the page as much as the convenience is: it is the standing
- * test of whether the device's self-description is enough for a second client.
- * Where it is not — a command that takes a request BODY, which no declaration
- * mentions — the page says so instead of special-casing its way around it.
+ * The registry is used, and only for the prompt: Tab completes a command name,
+ * then an argument name, then a bool's value, all off `help` at runtime. That is
+ * an offer and never a rewrite — a line the registry has never heard of is sent
+ * exactly as typed, and the device is what refuses it. So adding a command to
+ * the firmware adds it here, and this page still holds no list of its own.
  *
- * The output is laid out as a protocol trace: one row out, one row per record
- * back, in fixed columns. Records appear AS THEY ARRIVE, so a command that
- * reports progress is watched rather than summarised at the end.
+ * NOT the Console. That page is the device's stdout — lines it printed without
+ * being asked — and the two are kept apart on purpose: a reply belongs next to
+ * the request that asked for it, and a log line belongs to nothing.
  */
 
-/** How much reply text is rendered. A `partition read` answers in megabytes, and
- *  a megabyte of text in the DOM hangs the tab. */
-const PREVIEW_LIMIT = 64 * 1024
+/** Scrollback. Old rows keep their whole text, so this is a memory bound as much
+ *  as a scrollback one. */
+const MAX_ROWS = 500
 
-/** Trace depth. Old lines hold their whole text, so this is a memory bound as
- *  much as a scrollback one. */
-const MAX_LINES = 500
+/** How much of one record is drawn. `partition read` answers in megabytes, and a
+ *  megabyte of text in the DOM hangs the tab. */
+const RECORD_LIMIT = 32 * 1024
 
-type Tone = "normal" | "muted" | "bad"
+type Kind = "out" | "in" | "error"
 
-interface Body {
-  bytes: Uint8Array
-  contentType: string
-  /** The header's `contentEncoding`, when it declared one. */
-  encoding?: string
-  /** Decoded text, when the declared media type is one that has any. */
-  preview?: string
-}
-
-interface Line {
+interface Row {
   id: number
   at: Date
-  dir: "→" | "←" | ""
+  kind: Kind
   text: string
-  tone: Tone
+  /** Elapsed round trip, on the row that completed a command. */
   meta?: string
-  body?: Body
 }
 
-let nextLineId = 1
+let nextRowId = 1
 
 export default function CommandsPage() {
-  const { commands, loading, error, reload } = useCommands()
-  const [query, setQuery] = useState("")
-  const [selected, setSelected] = useState<string | null>(null)
-  // Per command, so stepping away to run something else and coming back does not
-  // lose what was typed. Keyed by wire name, which is what the registry gives us.
-  const [values, setValues] = useState<Record<string, Record<string, string>>>({})
-  const [lines, setLines] = useState<Line[]>([])
+  const { commands } = useCommands()
+  const [rows, setRows] = useState<Row[]>([])
+  const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
+  const [options, setOptions] = useState<string[]>([])
+  const history = useRef<string[]>([])
+  const historyAt = useRef(-1)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const command = commands.find((c) => c.name === selected) ?? null
-
-  // The first command the device reports, so the page is never an empty right
-  // half waiting to be clicked.
-  useEffect(() => {
-    if (!selected && commands.length > 0) setSelected(commands[0].name)
-  }, [commands, selected])
-
-  const matches = useMemo(() => filter(commands, query), [commands, query])
-
-  function setValue(name: string, value: string) {
-    if (!command) return
-    setValues((prev) => ({
-      ...prev,
-      [command.name]: { ...(prev[command.name] ?? initialValues(command)), [name]: value },
-    }))
-  }
-
-  function append(line: Omit<Line, "id" | "at">) {
-    setLines((prev) =>
-      [...prev, { ...line, id: nextLineId++, at: new Date() }].slice(-MAX_LINES),
+  function append(row: Omit<Row, "id" | "at">) {
+    setRows((prev) =>
+      [...prev, { ...row, id: nextRowId++, at: new Date() }].slice(-MAX_ROWS),
     )
   }
 
   async function run() {
-    if (!command || busy) return
+    const line = input.trim()
+    if (!line || busy) return
 
-    const envelope = buildEnvelope(command, values[command.name] ?? initialValues(command))
-    append({ dir: "→", text: JSON.stringify(envelope), tone: "normal" })
+    history.current = [...history.current.filter((h) => h !== line), line]
+    historyAt.current = -1
+    setInput("")
+    setOptions([])
+    append({ kind: "out", text: line })
     setBusy(true)
 
     const started = performance.now()
     try {
-      const reply = await backend.execute(envelope, {
-        // Records completed before the last one, as they arrive: progress from a
-        // long write, and the header of a reply that declares a body.
-        onRecord: (text) => append({ dir: "←", text: pretty(text), tone: "muted" }),
+      const reply = await backend.runConsole(line, {
+        // Records completed before the last one, as they arrive: a command that
+        // reports progress is watched rather than summarised at the end.
+        onRecord: (text) => append({ kind: "in", text: clip(text) }),
       })
       const elapsed = `${Math.round(performance.now() - started)} ms`
 
-      if (reply.result)
+      // The records already seen came through onRecord; only the last is new.
+      // A reply that declared a body has none left — its header WAS that last
+      // record, and everything after the divider is bytes.
+      const last = reply.body === null ? reply.records.at(-1) : undefined
+      if (last !== undefined) append({ kind: "in", text: clip(last), meta: elapsed })
+
+      if (reply.body)
         append({
-          dir: "←",
-          text: pretty(reply.result),
-          tone: refused(reply.result) ? "bad" : "normal",
+          kind: "in",
+          text:
+            `<${reply.body.length} bytes of ${reply.contentType}` +
+            `${reply.contentEncoding ? `, ${reply.contentEncoding}` : ""}>`,
           meta: elapsed,
         })
 
-      if (reply.body) {
-        const contentType = String(reply.header?.contentType ?? "application/octet-stream")
-        const encoding =
-          typeof reply.header?.contentEncoding === "string"
-            ? reply.header.contentEncoding
-            : undefined
-        append({
-          dir: "←",
-          text: `${formatBytes(reply.body.length)} of ${contentType}`,
-          tone: "normal",
-          meta: elapsed,
-          body: {
-            bytes: reply.body,
-            contentType,
-            encoding,
-            preview: await bodyPreview(reply.body, contentType, encoding),
-          },
-        })
-      }
+      if (reply.records.length === 0 && !reply.body)
+        append({ kind: "in", text: "(no reply)", meta: elapsed })
     } catch (e) {
-      // A RESET carries the device's reason — a missing argument, a malformed
-      // number, `busy`. A timeout and a dropped socket arrive the same way. All
-      // three are the device's answer as much as a record would be.
+      // A RESET carries the device's reason — an unknown command, a missing
+      // argument, `busy`. A timeout and a dropped socket arrive the same way,
+      // and all three are the device's answer as much as a record would be.
       append({
-        dir: "←",
+        kind: "error",
         text: e instanceof Error ? e.message : "Failed",
-        tone: "bad",
         meta: `${Math.round(performance.now() - started)} ms`,
       })
     } finally {
       setBusy(false)
+      inputRef.current?.focus()
     }
   }
 
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Tab") {
+      e.preventDefault()
+      const { line, options: offered } = complete(input, commands)
+      setInput(line)
+      setOptions(offered.length > 1 ? offered : [])
+      return
+    }
+
+    if (e.key === "l" && e.ctrlKey) {
+      e.preventDefault()
+      setRows([])
+      return
+    }
+
+    if (e.key === "c" && e.ctrlKey) {
+      // A shell's Ctrl+C on a prompt: abandon the line. The device is
+      // single-in-flight and will still answer whatever is running — this stops
+      // waiting for it, it does not reach across and stop the device.
+      e.preventDefault()
+      if (input) append({ kind: "out", text: `${input}^C` })
+      setInput("")
+      setOptions([])
+      return
+    }
+
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      if (history.current.length === 0) return
+      e.preventDefault()
+      const at =
+        e.key === "ArrowUp"
+          ? Math.min(historyAt.current + 1, history.current.length - 1)
+          : historyAt.current - 1
+      historyAt.current = Math.max(at, -1)
+      setInput(
+        historyAt.current < 0
+          ? ""
+          : history.current[history.current.length - 1 - historyAt.current],
+      )
+    }
+  }
+
+  const current = matchCommand(input, commands)
+
   return (
-    <div className="flex h-full flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="flex h-full flex-col gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <SquareTerminalIcon className="size-5 text-muted-foreground" />
           <h1 className="text-2xl font-bold">Commands</h1>
-          {commands.length > 0 && (
-            <span className="hidden text-sm text-muted-foreground sm:inline">
-              ({commands.length} discovered)
-            </span>
-          )}
+          <span className="hidden text-sm text-muted-foreground sm:inline">
+            {commands.length > 0 ? `${commands.length} discovered` : "connecting…"}
+          </span>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={reload} disabled={loading}>
-            <RefreshCwIcon className="mr-1.5 size-3.5" />
-            Rediscover
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setLines([])}
-            disabled={lines.length === 0}
-          >
-            <TrashIcon className="mr-1.5 size-3.5" />
-            Clear
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setRows([])}
+          disabled={rows.length === 0}
+        >
+          <TrashIcon className="mr-1.5 size-3.5" />
+          Clear
+        </Button>
       </div>
 
-      {error && (
-        <p className="text-sm text-destructive">
-          Could not read the command registry: {error}
-        </p>
-      )}
-      <div className="grid min-h-0 flex-1 gap-4 md:grid-cols-[16rem_1fr]">
-        <CommandList
-          commands={matches}
-          selected={selected}
-          onSelect={setSelected}
-          query={query}
-          onQuery={setQuery}
-          loading={loading && commands.length === 0}
-        />
+      <Transcript rows={rows} />
 
-        <div className="flex min-h-0 flex-col gap-3">
-          {command && (
-            <div className="shrink-0 rounded-xl border p-4">
-              <div className="mb-1 font-mono text-sm font-medium">{command.name}</div>
-              <p className="mb-4 text-sm text-muted-foreground">
-                {command.description ?? (
-                  <span className="italic">No description declared.</span>
-                )}
-              </p>
-
-              <CommandArgsForm
-                command={command}
-                values={values[command.name] ?? initialValues(command)}
-                onChange={setValue}
-                disabled={busy}
-              />
-
-              <div className="mt-4 flex items-center justify-between gap-4">
-                <p className="text-xs text-muted-foreground">
-                  An empty optional argument is left out of the envelope.
-                </p>
-                <Button onClick={() => void run()} disabled={busy} className="shrink-0">
-                  <PlayIcon className="mr-1.5 size-3.5" />
-                  {busy ? "Running…" : "Run"}
-                </Button>
-              </div>
-            </div>
-          )}
-
-          <Trace lines={lines} />
-        </div>
+      {/* What the registry knows about the line so far. An offer, never a rule:
+          the device is what decides whether a line is a command. */}
+      <div className="h-5 shrink-0 truncate px-1 font-mono text-xs text-muted-foreground">
+        {options.length > 0 ? options.join("  ") : current ? signature(current) : ""}
       </div>
+
+      <form
+        className="flex shrink-0 items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void run()
+        }}
+      >
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border px-3 py-2 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50">
+          <span className="shrink-0 font-mono text-sm text-muted-foreground select-none">
+            &gt;
+          </span>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              setOptions([])
+            }}
+            onKeyDown={onKeyDown}
+            spellCheck={false}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoFocus
+            placeholder="Type a command… (e.g. 'system ping', 'led set enabled=true')"
+            className="min-w-0 flex-1 bg-transparent font-mono text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        <Button type="submit" disabled={busy} className="shrink-0">
+          <SendIcon className="mr-1.5 size-3.5" />
+          {busy ? "Running…" : "Send"}
+        </Button>
+      </form>
+
+      <p className="shrink-0 px-1 text-xs text-muted-foreground">
+        <Key>↑ ↓</Key> history <Key>Tab</Key> autocomplete <Key>Ctrl+L</Key> clear{" "}
+        <Key>Ctrl+C</Key> cancel
+      </p>
     </div>
   )
 }
 
-function CommandList({
-  commands,
-  selected,
-  onSelect,
-  query,
-  onQuery,
-  loading,
-}: {
-  commands: CommandDesc[]
-  selected: string | null
-  onSelect: (name: string) => void
-  query: string
-  onQuery: (q: string) => void
-  loading: boolean
-}) {
-  return (
-    <div className="flex min-h-0 flex-col gap-2">
-      <div className="relative shrink-0">
-        <SearchIcon className="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          placeholder="Search commands"
-          spellCheck={false}
-          className="pl-8"
-        />
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border p-1">
-        {loading && (
-          <div className="space-y-2 p-2">
-            {Array.from({ length: 8 }, (_, i) => (
-              <Skeleton key={i} className="h-6 w-full" />
-            ))}
-          </div>
-        )}
-        {!loading && commands.length === 0 && (
-          <p className="p-3 text-sm text-muted-foreground">No command matches.</p>
-        )}
-        {commands.map((command) => (
-          <button
-            key={command.name}
-            type="button"
-            onClick={() => onSelect(command.name)}
-            className={`block w-full rounded-md px-2 py-1 text-left font-mono text-sm ${
-              command.name === selected
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted"
-            }`}
-          >
-            {command.name}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
+function Key({ children }: { children: React.ReactNode }) {
+  return <span className="ml-3 font-mono text-foreground first:ml-0">{children}</span>
 }
 
 /**
- * Everything sent and everything that came back, oldest at the top.
+ * Everything typed and everything answered, oldest at the top.
  *
  * Stuck to the bottom while you are already there, and left alone when you are
- * not: scrolling up to read what a command did twenty runs ago should not be
- * undone by the next record landing.
+ * not: scrolling up to read what a command did twenty lines ago should not be
+ * undone by the next reply landing.
  */
-function Trace({ lines }: { lines: Line[] }) {
+function Transcript({ rows }: { rows: Row[] }) {
   const ref = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
   useLayoutEffect(() => {
-    const element = ref.current
-    if (element && pinned.current) element.scrollTop = element.scrollHeight
-  }, [lines])
+    const el = ref.current
+    if (el && pinned.current) el.scrollTop = el.scrollHeight
+  }, [rows])
 
   return (
     <div
@@ -326,181 +259,60 @@ function Trace({ lines }: { lines: Line[] }) {
       }}
       className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-muted/30 py-1 font-mono text-xs"
     >
-      {lines.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="px-3 py-2 text-muted-foreground">
-          Nothing run yet. Everything below comes from the device.
+          Nothing run yet. Type <span className="text-foreground">help</span> to see
+          what this device can do.
         </p>
       ) : (
-        lines.map((line) => <Row key={line.id} line={line} />)
+        rows.map((row) => <Line key={row.id} row={row} />)
       )}
     </div>
   )
 }
 
-function Row({ line }: { line: Line }) {
-  const tone =
-    line.tone === "bad"
-      ? "text-destructive"
-      : line.tone === "muted"
-        ? "text-muted-foreground"
-        : undefined
-
+function Line({ row }: { row: Row }) {
   return (
     <div className="flex items-baseline gap-2 px-3 leading-5 hover:bg-muted/60">
       <span className="w-[6.5rem] shrink-0 text-muted-foreground tabular-nums">
-        {stamp(line.at)}
+        {stamp(row.at)}
       </span>
-      <span
-        className={`w-3 shrink-0 text-center select-none ${
-          line.dir === "→" ? "text-muted-foreground" : ""
+      <span className="w-8 shrink-0 select-none">
+        <Badge kind={row.kind} />
+      </span>
+      <pre
+        className={`min-w-0 flex-1 whitespace-pre-wrap ${
+          row.kind === "error" ? "text-destructive" : ""
         }`}
       >
-        {line.dir}
-      </span>
-      <div className="min-w-0 flex-1">
-        <pre className={`whitespace-pre-wrap ${tone ?? ""}`}>{line.text}</pre>
-        {line.body && <BodyRow body={line.body} />}
-      </div>
-      {line.meta && (
+        {row.text}
+      </pre>
+      {row.meta && (
         <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
-          {line.meta}
+          {row.meta}
         </span>
       )}
     </div>
   )
 }
 
-/**
- * A declared body: what it is, a way to keep it, and its text when it has any.
- *
- * Which of those applies is decided by the media type the reply DECLARED, never
- * by which command was run — that declaration is the only thing about a body the
- * protocol makes discoverable, and it turns out to be enough.
- */
-function BodyRow({ body }: { body: Body }) {
+function Badge({ kind }: { kind: Kind }) {
+  const colors =
+    kind === "out"
+      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+      : kind === "error"
+        ? "bg-destructive/15 text-destructive"
+        : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
   return (
-    <div className="my-1 rounded-md border bg-background/60 p-2">
-      <div className="mb-1 flex items-center gap-2">
-        <span className="text-muted-foreground">
-          {body.contentType}
-          {body.encoding ? ` · ${body.encoding}` : ""}
-        </span>
-        <Button
-          variant="outline"
-          size="sm"
-          className="ml-auto h-6 px-2 text-xs"
-          onClick={() => download(body)}
-        >
-          <DownloadIcon className="mr-1 size-3" />
-          Save
-        </Button>
-      </div>
-      {body.preview !== undefined ? (
-        <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{body.preview}</pre>
-      ) : (
-        <p className="text-muted-foreground italic">
-          Not a textual media type — save it to look at it.
-        </p>
-      )}
-    </div>
+    <span className={`rounded px-1 py-px text-[0.625rem] font-medium ${colors}`}>
+      {kind === "out" ? "OUT" : "IN"}
+    </span>
   )
 }
 
-function filter(commands: CommandDesc[], query: string): CommandDesc[] {
-  const q = query.trim().toLowerCase()
-  if (!q) return commands
-  // Descriptions are searched too: someone looking for "reboot" should find
-  // `partition activate`, which is what actually reboots into a new image.
-  return commands.filter((c) =>
-    `${c.name} ${c.description ?? ""}`.toLowerCase().includes(q),
-  )
-}
-
-/** A record that says `ok: false`. A reply without the field — `system ping`
- *  answers `{"pong":true}` — is not a failure and must not be painted as one. */
-function refused(record: string): boolean {
-  return tryParse(record)?.ok === false
-}
-
-/** A record, as the trace draws it: YAML when it is JSON, and the bytes as they
- *  came when it is not. A handler may write anything, and a console that hid
- *  what it could not parse would hide exactly the reply worth looking at.
- *
- *  Only the REPLY is rendered. The request line above it stays the envelope
- *  exactly as it went out, because what was sent is the thing being debugged. */
-function pretty(record: string): string {
-  const parsed = tryParse(record)
-  const text = parsed ? toYaml(parsed) : record
-  return text.length > PREVIEW_LIMIT
-    ? `${text.slice(0, PREVIEW_LIMIT)}\n… ${formatBytes(text.length - PREVIEW_LIMIT)} not shown`
-    : text
-}
-
-function tryParse(text: string): Record<string, unknown> | null {
-  try {
-    const v = JSON.parse(text)
-    return v && typeof v === "object" && !Array.isArray(v)
-      ? (v as Record<string, unknown>)
-      : null
-  } catch {
-    return null
-  }
-}
-
-/** The body as text, when the declared media type says it is text. Undefined for
- *  anything else — a flash image rendered as mojibake helps nobody. */
-async function bodyPreview(
-  bytes: Uint8Array,
-  contentType: string,
-  encoding?: string,
-): Promise<string | undefined> {
-  if (!textual(contentType)) return undefined
-
-  let data = bytes
-  if (encoding === "gzip") {
-    try {
-      data = await gunzip(bytes)
-    } catch {
-      return undefined
-    }
-  }
-
-  const text = new TextDecoder().decode(data.subarray(0, PREVIEW_LIMIT))
-  return data.length > PREVIEW_LIMIT
-    ? `${text}\n… ${formatBytes(data.length - PREVIEW_LIMIT)} not shown`
-    : text
-}
-
-function textual(contentType: string): boolean {
-  const type = contentType.split(";")[0].trim().toLowerCase()
-  return (
-    type.startsWith("text/") ||
-    type.endsWith("+json") ||
-    type.endsWith("+xml") ||
-    ["application/json", "application/xml", "application/javascript"].includes(type)
-  )
-}
-
-async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes as BlobPart])
-    .stream()
-    .pipeThrough(new DecompressionStream("gzip"))
-  return new Uint8Array(await new Response(stream).arrayBuffer())
-}
-
-/** Saved as it ARRIVED, compression included, because that is what the device
- *  sent; the name says so rather than the bytes being quietly rewritten. */
-function download(body: Body) {
-  const subtype = body.contentType.split(";")[0].split("/").pop() ?? "bin"
-  const extension = subtype === "octet-stream" ? "bin" : subtype.split("+").pop()!
-  const name = `reply.${extension}${body.encoding === "gzip" ? ".gz" : ""}`
-
-  const url = URL.createObjectURL(new Blob([body.bytes as BlobPart]))
-  const a = document.createElement("a")
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
+function clip(text: string): string {
+  if (text.length <= RECORD_LIMIT) return text
+  return `${text.slice(0, RECORD_LIMIT)}\n… ${text.length - RECORD_LIMIT} more characters`
 }
 
 /** 24-hour clock with milliseconds, which is the resolution a round trip needs. */
@@ -510,10 +322,4 @@ function stamp(at: Date): string {
     `${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}` +
     `.${pad(at.getMilliseconds(), 3)}`
   )
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }

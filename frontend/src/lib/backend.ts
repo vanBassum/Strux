@@ -1,7 +1,7 @@
 // Singleton backend service — all communication over a single WebSocket.
 
 import { DEV_HOST } from "@/config"
-import { ReplyReader, type ReplyResult } from "./reply"
+import { ReplyReader } from "./reply"
 import { ConsoleReplyReader, type ConsoleReply } from "./consoleReply"
 
 const TOKEN_KEY = "device.token"
@@ -34,10 +34,6 @@ interface PendingRequest {
   // The caller expects a declared body (a header record with contentType, then
   // bytes). Resolves with { header, body } instead of the parsed record.
   wantsBody?: boolean
-  // The caller wants the reader's result with nothing read into it: every
-  // record, the result, and a body if one was declared. `wantsBody` is one
-  // interpretation of that; this is the absence of any.
-  wantsRaw?: boolean
   // Cumulative BODY bytes, for progress.
   onData?: (received: number) => void
 }
@@ -477,7 +473,6 @@ class BackendService {
       onRecord?: (text: string) => void
       wantsConsole?: boolean
       wantsBody?: boolean
-      wantsRaw?: boolean
       onData?: (received: number) => void
     } = {},
   ): Promise<T> {
@@ -499,7 +494,6 @@ class BackendService {
         onMessage: opts.onMessage,
         onRecord: opts.onRecord,
         wantsBody: opts.wantsBody,
-        wantsRaw: opts.wantsRaw,
         onData: opts.onData,
       })
     })
@@ -523,35 +517,6 @@ class BackendService {
     opts: SendOptions<M> = {},
   ): Promise<T> {
     return this.enqueue(() => this.sendUnqueued<T, M>(type, params, opts))
-  }
-
-  /** Run an envelope the caller composed, and hand back the reply exactly as it
-   *  arrived: every record, the result, and a declared body if there was one.
-   *
-   *  The typed methods below all answer a question this file knows the shape of.
-   *  This one answers a question only the person typing it knows, so it must not
-   *  interpret — a reply it cannot parse is still the device's answer and still
-   *  has to be shown. It is the command workbench's whole backend.
-   *
-   *  `timeoutMs` bounds SILENCE, as everywhere else. It defaults higher than
-   *  `send` does because anything may be typed here, including the commands that
-   *  write flash. */
-  async execute(
-    envelope: Record<string, unknown>,
-    opts: { timeoutMs?: number; onRecord?: (text: string) => void } = {},
-  ): Promise<ReplyResult> {
-    return this.enqueue(async () => {
-      await this.ensureConnected()
-      const session = this.allocSession()
-      const reply = this.awaitReply<ReplyResult>(session, {
-        timeoutMs: opts.timeoutMs ?? 30000,
-        onRecord: opts.onRecord,
-        wantsRaw: true,
-      })
-      const request = new TextEncoder().encode(JSON.stringify(envelope) + "\n")
-      this.sendChunk(session, FLAG_OPEN | FLAG_FINAL, request)
-      return reply
-    })
   }
 
   /** One command, WITHOUT taking a queue slot. Only for a caller that already
@@ -672,11 +637,6 @@ class BackendService {
 
     const reply = (req.reader as ReplyReader).end()
 
-    if (req.wantsRaw) {
-      req.resolve(reply)
-      return
-    }
-
     if (req.wantsBody) {
       if (!reply.body || !reply.header) {
         // The command answered without declaring a body. That is a refusal
@@ -735,9 +695,9 @@ class BackendService {
    *
    *  Nothing is translated on the way out — `led set enabled=true` reaches the
    *  device as those bytes, and the firmware's ConsoleEnvelope is what reads
-   *  them. The reply comes back as YAML records, which is why this cannot go
-   *  through `execute`: that one's reader divides records by newline, which is
-   *  the JSON codec's separator and not the protocol's. */
+   *  them. The reply comes back as YAML records, which is why this has a reader
+   *  of its own: `send` divides records by newline, and that is the JSON codec's
+   *  separator rather than the protocol's. */
   async runConsole(
     line: string,
     opts: { timeoutMs?: number; onRecord?: (text: string) => void } = {},
