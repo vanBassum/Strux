@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCommands } from "@/hooks/use-commands"
 import { backend, type CommandDesc } from "@/lib/backend"
+import { toYaml } from "@/lib/yaml"
 
 /**
  * The command console: pick a command the device declared, fill in the arguments
@@ -421,9 +422,15 @@ function refused(record: string): boolean {
   return tryParse(record)?.ok === false
 }
 
+/** A record, as the trace draws it: YAML when it is JSON, and the bytes as they
+ *  came when it is not. A handler may write anything, and a console that hid
+ *  what it could not parse would hide exactly the reply worth looking at.
+ *
+ *  Only the REPLY is rendered. The request line above it stays the envelope
+ *  exactly as it went out, because what was sent is the thing being debugged. */
 function pretty(record: string): string {
   const parsed = tryParse(record)
-  const text = parsed ? JSON.stringify(parsed, null, 2) : record
+  const text = parsed ? toYaml(parsed) : record
   return text.length > PREVIEW_LIMIT
     ? `${text.slice(0, PREVIEW_LIMIT)}\n… ${formatBytes(text.length - PREVIEW_LIMIT)} not shown`
     : text
