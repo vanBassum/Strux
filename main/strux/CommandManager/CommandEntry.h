@@ -20,12 +20,14 @@ class Stream;
 // ──────────────────────────────────────────────────────────────
 struct CommandEntry
 {
-    // Two-part route: `partition write`, `system ping`. The category is the domain the
-    // owning manager already claims, which is the one piece of structure a flat
-    // registry threw away — and it is what lets `list` and `status` exist in several
-    // places without colliding. Two levels, fixed: deeper nesting would turn dispatch
-    // into a tree walk for nothing.
-    const char* category;
+    // The command, exactly as the wire carries it: `partition write`, `system ping`.
+    // ONE identity, because the wire only ever had one — it used to be split into a
+    // category and a name at dispatch and joined again everywhere it was shown.
+    //
+    // The first word still groups: `help` derives a category from it and AuthGate
+    // gates on it. Both derive, neither stores, because grouping for display and
+    // grouping for permission are questions ABOUT a command rather than part of what
+    // it is called — and a command that had two identities had to keep them in step.
     const char* name;
     CommandResult (*handler)(void* ctx, CommandContext& c);
 

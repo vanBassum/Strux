@@ -190,10 +190,6 @@ public:
         req_ = data; reqLen_ = len; reqPos_ = 0; reqFinal_ = final;
     }
 
-    // The first chunk's payload, without consuming it — lets the dispatcher read
-    // the header line for routing while the handler still reads it as `in`.
-    void peekRequest(const uint8_t*& data, size_t& len) const { data = req_; len = reqLen_; }
-
     size_t read(void* dst, size_t size, TickType_t timeout = portMAX_DELAY) override
     {
         (void)timeout;

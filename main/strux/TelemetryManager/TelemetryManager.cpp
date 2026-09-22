@@ -20,7 +20,7 @@ TelemetryManager::TelemetryManager(StruxProvider& strux)
 }
 
 CommandEntry TelemetryManager::statsCommand_{
-    "telemetry", "stats", &InvokeCommand<&TelemetryManager::Cmd_Stats>
+    "telemetry stats", &InvokeCommand<&TelemetryManager::Cmd_Stats>
 };
 
 void TelemetryManager::Init()

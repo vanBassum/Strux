@@ -18,24 +18,24 @@ SystemManager::SystemManager(StruxProvider& strux)
 }
 
 CommandEntry SystemManager::pingCommand_{
-    "system", "ping", &InvokeCommand<&SystemManager::Cmd_Ping>,
+    "system ping", &InvokeCommand<&SystemManager::Cmd_Ping>,
     "Check the device is answering. Takes nothing, returns {\"pong\":true}."
 };
 
 CommandEntry SystemManager::infoCommand_{
-    "system", "info", &InvokeCommand<&SystemManager::Cmd_Info>,
+    "system info", &InvokeCommand<&SystemManager::Cmd_Info>,
     "Report this device's runtime state: name, firmware build, chip, clock, IP "
     "address, free heap and the device's own clock."
 };
 
 CommandEntry SystemManager::rebootCommand_{
-    "system", "reboot", &InvokeCommand<&SystemManager::Cmd_Reboot>,
+    "system reboot", &InvokeCommand<&SystemManager::Cmd_Reboot>,
     "Restart the device. The reply is written first, then the device restarts "
     "about half a second later and every connection drops."
 };
 
 CommandEntry SystemManager::describeCommand_{
-    "system", "describe", &InvokeCommand<&SystemManager::Cmd_Describe>,
+    "system describe", &InvokeCommand<&SystemManager::Cmd_Describe>,
     "What this device IS: its name, firmware, one-line description and its "
     "full instructions - how it is meant to be driven. Pair it with "
     "'help describe', which is the same question about the commands."

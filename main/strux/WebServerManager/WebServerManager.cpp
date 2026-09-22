@@ -39,7 +39,7 @@ constexpr CommandArg<const char*> pathArg{
 } // namespace
 
 CommandEntry WebServerManager::readCommand_{
-    "web", "read", &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
+    "web read", &InvokeCommand<&WebServerManager::Cmd_GetWebFile>,
     "Read one file of the device's own web UI. The reply is a JSON header "
     "line (status, content type, encoding), a newline, then the raw bytes - "
     "which may be gzipped. It serves the device's browser page; it is not a "

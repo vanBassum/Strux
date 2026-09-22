@@ -25,13 +25,13 @@ constexpr CommandArg<const char*> keyArg{
 } // namespace
 
 CommandEntry AuthManager::helloCommand_{
-    "auth", "hello", &InvokeCommand<&AuthManager::Cmd_AuthHello>,
+    "auth hello", &InvokeCommand<&AuthManager::Cmd_AuthHello>,
     "Ask whether this connection has to log in before anything else will be "
     "answered. With no web password set - the default - it never does."
 };
 
 CommandEntry AuthManager::loginCommand_{
-    "auth", "login", &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
+    "auth login", &InvokeCommand<&AuthManager::Cmd_AuthLogin>,
     "Authenticate this connection with the device's web password. On success "
     "the reply carries a channel key that 'auth resume' takes. Failed attempts "
     "are rate limited, and a refusal says which of the two it was.",
@@ -39,7 +39,7 @@ CommandEntry AuthManager::loginCommand_{
 };
 
 CommandEntry AuthManager::resumeCommand_{
-    "auth", "resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
+    "auth resume", &InvokeCommand<&AuthManager::Cmd_AuthResume>,
     "Re-authenticate a reconnected client with the channel key a previous "
     "'auth login' handed out, instead of the password again.",
     { &keyArg }

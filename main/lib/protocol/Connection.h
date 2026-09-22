@@ -4,7 +4,7 @@
 #include "ChannelProtocol.h"
 #include "ChannelTable.h"
 #include "ConnectionState.h"
-#include "CommandEnvelope.h"
+#include "CommandChannel.h"
 #include "Transport.h"
 
 #include "esp_log.h"

@@ -3,7 +3,7 @@
 #include <esp_http_server.h>
 #include "Mutex.h"
 #include "ResumeTokens.h"
-#include "CommandEnvelope.h"
+#include "CommandChannel.h"
 #include "ConnectionRegistry.h"
 
 class CommandManager;

@@ -11,6 +11,7 @@
 #include <initializer_list>
 
 class Stream;
+class EnvelopeLine;
 
 // Pure dispatcher — knows no other managers, and no commands but the
 // registry's own (`help`, which is the registry describing itself and
@@ -59,13 +60,13 @@ public:
             // and cycle it → Execute() would hang. Chain-corruption class,
             // so FATAL (survives NDEBUG), not assert.
             if (c->registered)
-                FATAL("command '%s %s' registered twice", c->category, c->name);
-            assert(Find(c->category, c->name) == nullptr && "duplicate command name");
+                FATAL("command '%s' registered twice", c->name);
+            assert(Find(c->name) == nullptr && "duplicate command name");
             // The declaration list is null-terminated and the last slot is the
             // terminator's. A list that fills it would be walked off the end.
             if (c->args[MAX_COMMAND_ARGS] != nullptr)
-                FATAL("command '%s %s' declares more than %d arguments",
-                      c->category, c->name, (int)MAX_COMMAND_ARGS);
+                FATAL("command '%s' declares more than %d arguments",
+                      c->name, (int)MAX_COMMAND_ARGS);
 
             c->ctx = ctx;
             c->registered = true;
@@ -74,21 +75,19 @@ public:
         }
     }
 
-    /// Execute a command by type name. `in` carries the request payload;
-    /// the handler writes its complete reply (e.g. one JSON object) to
-    /// `out`. The caller owns any transport envelope around it.
+    /// Run the command the envelope names. `in` is positioned at the request body
+    /// (empty for most commands) and the handler writes its reply to `out`.
     ///
-    /// Returns Ok, UnknownCommand, or whatever a failed argument pull reported.
-    /// `failedArg` (when non-null) receives the argument name a pull was looking
-    /// for, so the caller can compose the refusal text.
+    /// The envelope arrives already read — the interface built it, because reading it
+    /// is what leaves `in` at the body — and is asked to decode this command's
+    /// declared arguments. Nothing here names a wire format.
     ///
-    /// Whether the request has already been read depends on the handler's shape:
-    /// an argument-pulling handler gets its envelope consumed by the framework
-    /// first, an unconverted one still parses `in` itself. See CommandEntry.
-    CommandResult Execute(const char* category, const char* name,
-                         Stream& in, Stream& out,
-                         ConnectionAuth* connection = nullptr,
-                         const char** failedArg = nullptr);
+    /// Returns Ok, UnknownCommand, or whatever the decode reported. `failedArg` (when
+    /// non-null) receives the argument name a failure was about, so the caller can
+    /// compose the refusal text.
+    CommandResult Execute(EnvelopeLine& envelope, Stream& in, Stream& out,
+                          ConnectionAuth* connection = nullptr,
+                          const char** failedArg = nullptr);
 
 private:
     StruxProvider& strux_;
@@ -100,7 +99,12 @@ private:
     // Locks internally (recursive, so Register may call it under its own
     // lock). Handing the pointer out after unlock is safe because entries
     // are immortal and name/handler/ctx are written before linking.
-    const CommandEntry* Find(const char* category, const char* name);
+    const CommandEntry* Find(const char* name);
+
+    /// The command `help` addresses as two words. It exists because `help list` takes
+    /// a category and a command separately and always has; a route is joined here
+    /// rather than in a buffer.
+    const CommandEntry* FindInCategory(const char* category, const char* command);
 
     // ── help: the registry describing itself ──────────────────
     //
@@ -132,14 +136,15 @@ private:
     void ListCategories(ReplyWriter& reply);
     void ListCategory(const char* category, ReplyWriter& reply);
     CommandResult DescribeCommand(const char* category, const char* command,
-                                 ReplyWriter& reply);
+                                  ReplyWriter& reply);
 
     /// Writes one command's declared arguments into `args`, straight off its entry.
     void DescribeArguments(const CommandEntry& entry, ReplyArray& args);
 
-    /// Collects the distinct categories on the chain into `out`. Caller holds the
-    /// mutex. Returns how many were found; `truncated` says the chain had more than
-    /// MAX_CATEGORIES of them.
+    /// Collects one command name per distinct category into `out` — the NAME, because
+    /// a category is its first word and is not a string of its own anywhere. Caller
+    /// holds the mutex. Returns how many were found; `truncated` says the chain had
+    /// more than MAX_CATEGORIES of them.
     size_t CollectCategories(const char** out, size_t cap, bool& truncated);
 
     // Defined in CommandManager.cpp, beside the handlers and the arguments they read.

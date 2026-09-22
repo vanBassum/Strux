@@ -4,7 +4,7 @@
 #include "InitState.h"
 #include "TypedSettings.h"
 #include "Task.h"
-#include "CommandEnvelope.h"
+#include "CommandChannel.h"
 #include "ChannelProtocol.h"
 #include "WsConnection.h"
 #include "RelaySocket.h"

@@ -1,7 +1,6 @@
 #include "SettingsManager.h"
 #include "CommandManager.h"
 #include "ContextLock.h"
-#include "JsonReader.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "nvs_flash.h"
@@ -36,21 +35,21 @@ constexpr CommandArg<const char*> valueArg{
 } // namespace
 
 CommandEntry SettingsManager::listCommand_{
-    "settings", "list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
+    "settings list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
     "List every setting registered on this device with its key, label, type "
     "and current value. This is the whole configuration surface - there are "
     "no hidden keys."
 };
 
 CommandEntry SettingsManager::setCommand_{
-    "settings", "set", &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
+    "settings set", &InvokeCommand<&SettingsManager::Cmd_SetSetting>,
     "Change one setting's value in RAM. NOT durable on its own: call "
     "'settings save' afterwards or the change is lost at the next reboot.",
     { &keyArg, &valueArg }
 };
 
 CommandEntry SettingsManager::saveCommand_{
-    "settings", "save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
+    "settings save", &InvokeCommand<&SettingsManager::Cmd_SaveSettings>,
     "Commit every setting changed with 'settings set' to NVS so they survive "
     "a reboot. Several settings only take effect after one."
 };

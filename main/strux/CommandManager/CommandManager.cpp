@@ -26,12 +26,11 @@ void CommandManager::Init()
     ESP_LOGI(TAG, "Initialized");
 }
 
-CommandResult CommandManager::Execute(const char* category, const char* name,
-                                     Stream& in, Stream& out,
-                                     ConnectionAuth* connection,
-                                     const char** failedArg)
+CommandResult CommandManager::Execute(EnvelopeLine& envelope, Stream& in, Stream& out,
+                                      ConnectionAuth* connection,
+                                      const char** failedArg)
 {
-    const CommandEntry* e = Find(category, name);
+    const CommandEntry* e = Find(envelope.command());
     if (e == nullptr)
         return CommandResult::UnknownCommand;
 
@@ -39,18 +38,14 @@ CommandResult CommandManager::Execute(const char* category, const char* name,
     // stays valid, and a handler may register commands or dispatch nested
     // commands without deadlocking.
     //
-    // Reading the envelope line is what leaves `in` at the body, so it happens for
-    // every command whether or not it takes arguments. The decode against the
-    // command's declarations then happens before the handler runs, which is why a
-    // handler has no prologue and receives its arguments already validated.
-    EnvelopeLine envelope(in);
-    JsonReplyWriter writer(out);
-
+    // Arguments are decoded before the handler runs, which is why a handler has no
+    // prologue and receives them already validated. A command that declares none
+    // skips the decode entirely — there is nothing for it to look for.
     ArgValues values;
     if (e->args[0] != nullptr)
     {
         const char* failed = nullptr;
-        const CommandResult err = DecodeJsonArgs(envelope.text(), e->args, values, failed);
+        const CommandResult err = envelope.decode(e->args, values, failed);
         if (err != CommandResult::Ok)
         {
             if (failedArg) *failedArg = failed;
@@ -58,6 +53,7 @@ CommandResult CommandManager::Execute(const char* category, const char* name,
         }
     }
 
+    JsonReplyWriter writer(out);
     CommandContext ctx(writer, in, out, e->args, values, connection);
     return e->handler(e->ctx, ctx);
 }
@@ -88,11 +84,46 @@ const char* DescribeCommandResult(CommandResult e, const char* arg, char* buf, s
 
 namespace {
 
-// Was CommandManager::MAX_ROUTE, a 32-byte buffer these two handlers filled and
-// nothing else used. It matches protocol::MAX_COMMAND_NAME, the longest route word
-// the wire router carries; one less is the length at which a value was refused,
-// which is the number the declaration now states outright.
-constexpr uint16_t ROUTE_MAX = 31;
+/// A command's category is the first word of its name. Grouping is display, so it is
+/// derived where it is shown rather than stored on every command.
+size_t CategoryLen(const char* name)
+{
+    const char* space = strchr(name, ' ');
+    return space != nullptr ? static_cast<size_t>(space - name) : strlen(name);
+}
+
+bool SameCategory(const char* a, const char* b)
+{
+    const size_t n = CategoryLen(a);
+    return n == CategoryLen(b) && memcmp(a, b, n) == 0;
+}
+
+bool InCategory(const char* name, const char* category)
+{
+    const size_t n = strlen(category);
+    return strncmp(name, category, n) == 0 && (name[n] == ' ' || name[n] == '\0');
+}
+
+/// What `help` lists as a command's short name. A tail of the full name, so it needs
+/// no buffer of its own.
+const char* ShortName(const char* name)
+{
+    const char* space = strchr(name, ' ');
+    return space != nullptr ? space + 1 : name;
+}
+
+/// The category as a string, for the one place that needs one: a reply field.
+void CopyCategory(const char* name, char* out, size_t cap)
+{
+    size_t n = CategoryLen(name);
+    if (n > cap - 1) n = cap - 1;
+    memcpy(out, name, n);
+    out[n] = '\0';
+}
+
+// A command name is the longest either of these can usefully be; one less is the
+// length at which a value is refused, which is the number the declarations state.
+constexpr uint16_t ROUTE_MAX = protocol::MAX_COMMAND_NAME - 1;
 
 constexpr CommandArg<const char*> listCategoryArg{
     "category", "Limit the answer to one category, e.g. 'partition'. Omit it to list "
@@ -112,14 +143,14 @@ constexpr CommandArg<const char*> describeCategoryArg{
 } // namespace
 
 CommandEntry CommandManager::listCommand_{
-    "help", "list", &InvokeCommand<&CommandManager::Cmd_Help>,
+    "help list", &InvokeCommand<&CommandManager::Cmd_Help>,
     "List the device's command categories, one category's commands, or one "
     "command's arguments.",
     { &listCategoryArg, &listCommandArg }
 };
 
 CommandEntry CommandManager::describeCommand_{
-    "help", "describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
+    "help describe", &InvokeCommand<&CommandManager::Cmd_Describe>,
     "Describe every command this firmware offers - category, name, description "
     "and full argument declarations - in one reply.",
     { &describeCategoryArg }
@@ -153,11 +184,11 @@ size_t CommandManager::CollectCategories(const char** out, size_t cap, bool& tru
     {
         bool known = false;
         for (size_t i = 0; i < count && !known; ++i)
-            known = strcmp(out[i], e->category) == 0;
+            known = SameCategory(out[i], e->name);
         if (known) continue;
 
         if (count == cap) { truncated = true; break; }
-        out[count++] = e->category;
+        out[count++] = e->name;
     }
 
     return count;
@@ -181,12 +212,15 @@ void CommandManager::ListCategories(ReplyWriter& reply)
         auto cats = resp.array("categories");
         for (size_t i = 0; i < count; ++i)
         {
+            char category[protocol::MAX_COMMAND_NAME];
+            CopyCategory(seen[i], category, sizeof(category));
+
             auto cat = cats.object();
-            cat.field("category", seen[i]);
+            cat.field("category", category);
             auto names = cat.array("commands");
             for (const CommandEntry* e = head_; e != nullptr; e = e->next)
-                if (strcmp(seen[i], e->category) == 0)
-                    names.value(e->name);
+                if (InCategory(e->name, category))
+                    names.value(ShortName(e->name));
         }
     }
     if (truncated)
@@ -201,7 +235,7 @@ void CommandManager::ListCategory(const char* category, ReplyWriter& reply)
 
     bool found = false;
     for (const CommandEntry* e = head_; e != nullptr && !found; e = e->next)
-        found = strcmp(category, e->category) == 0;
+        found = InCategory(e->name, category);
 
     if (!found)
     {
@@ -214,8 +248,8 @@ void CommandManager::ListCategory(const char* category, ReplyWriter& reply)
     resp.field("category", category);
     auto names = resp.array("commands");
     for (const CommandEntry* e = head_; e != nullptr; e = e->next)
-        if (strcmp(category, e->category) == 0)
-            names.value(e->name);
+        if (InCategory(e->name, category))
+            names.value(ShortName(e->name));
 }
 
 CommandResult CommandManager::DescribeCommand(const char* category, const char* command,
@@ -232,7 +266,7 @@ CommandResult CommandManager::DescribeCommand(const char* category, const char* 
         return CommandResult::Ok;
     }
 
-    const CommandEntry* e = Find(category, command);
+    const CommandEntry* e = FindInCategory(category, command);
     if (e == nullptr)
     {
         resp.field("ok", false);
@@ -241,8 +275,8 @@ CommandResult CommandManager::DescribeCommand(const char* category, const char* 
     }
 
     resp.field("ok", true);
-    resp.field("category", e->category);
-    resp.field("command", e->name);
+    resp.field("category", category);
+    resp.field("command", ShortName(e->name));
     if (e->help != nullptr && e->help[0] != '\0')
         resp.field("description", e->help);
 
@@ -291,19 +325,22 @@ CommandResult CommandManager::Cmd_Describe(CommandContext& ctx)
         auto cats = resp.array("categories");
         for (size_t i = 0; i < count; ++i)
         {
-            if (category[0] != '\0' && strcmp(category, seen[i]) != 0)
+            char group[protocol::MAX_COMMAND_NAME];
+            CopyCategory(seen[i], group, sizeof(group));
+
+            if (category[0] != '\0' && strcmp(category, group) != 0)
                 continue;
 
             auto cat = cats.object();
-            cat.field("category", seen[i]);
+            cat.field("category", group);
 
             auto commands = cat.array("commands");
             for (const CommandEntry* e = head_; e != nullptr; e = e->next)
             {
-                if (strcmp(seen[i], e->category) != 0) continue;
+                if (!InCategory(e->name, group)) continue;
 
                 auto cmd = commands.object();
-                cmd.field("name", e->name);
+                cmd.field("name", ShortName(e->name));
                 if (e->help != nullptr && e->help[0] != '\0')
                     cmd.field("description", e->help);
 
@@ -318,11 +355,26 @@ CommandResult CommandManager::Cmd_Describe(CommandContext& ctx)
     return CommandResult::Ok;
 }
 
-const CommandEntry* CommandManager::Find(const char* category, const char* name)
+const CommandEntry* CommandManager::Find(const char* name)
 {
     LOCK(mutex_);
     for (CommandEntry* e = head_; e != nullptr; e = e->next)
-        if (strcmp(name, e->name) == 0 && strcmp(category, e->category) == 0)
+        if (strcmp(name, e->name) == 0)
+            return e;
+    return nullptr;
+}
+
+const CommandEntry* CommandManager::FindInCategory(const char* category,
+                                                   const char* command)
+{
+    // Compared in two parts rather than joined into a buffer: `help list` asks for a
+    // category and a command separately, and the registry holds them as one string.
+    const size_t n = strlen(category);
+
+    LOCK(mutex_);
+    for (CommandEntry* e = head_; e != nullptr; e = e->next)
+        if (strncmp(e->name, category, n) == 0 && e->name[n] == ' ' &&
+            strcmp(e->name + n + 1, command) == 0)
             return e;
     return nullptr;
 }

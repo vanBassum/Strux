@@ -8,7 +8,7 @@
 // per-transport code — Channel and every command handler are written against this
 // interface and are identical across transports.
 //
-// This header, ChannelProtocol.h, Channel.h and CommandEnvelope.h are the whole of
+// This header, ChannelProtocol.h, Channel.h and CommandChannel.h are the whole of
 // the protocol layer, depending on nothing but Stream and the JSON helpers. They
 // live in lib/ rather than under a transport because the transports depend on them,
 // not the reverse.

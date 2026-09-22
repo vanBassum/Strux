@@ -43,7 +43,7 @@ ConsoleManager::ConsoleManager(StruxProvider& strux)
 }
 
 CommandEntry ConsoleManager::logListCommand_{
-    "log", "list", &InvokeCommand<&ConsoleManager::Cmd_GetLogs>,
+    "log list", &InvokeCommand<&ConsoleManager::Cmd_GetLogs>,
     "Return the device's in-memory log ring - everything it has printed since "
     "boot, oldest first. The ring is fixed size, so older lines are gone."
 };
