@@ -9,34 +9,24 @@ Last updated 2026-09-22.
 
 ## Now
 
-**Every command declares its arguments, and nothing is executed to describe it.** A
-command's arguments are `constexpr CommandArg<T>` descriptors named by its
-`CommandEntry`; the framework decodes them before the handler runs and the handler
-reads them with `ctx.arg()` / `ctx.has()`. All 24 commands are converted and the old
-mechanism is deleted -- `DescribeArgReader`, `ArgReader`, `ArgSpec`, `readArgs`,
-`RETURN_IF_ERROR`, `RequestError::Described`. `JsonArgReader` is now `EnvelopeLine`,
-which consumes the envelope line (leaving the stream at the body) and keeps it mutable
-for the decoder, and does nothing else. `help describe` for the whole registry is
-byte-identical to the capture taken before any of it, checked on the bench devkit.
+**The command subsystem has one model, end to end.** A manager owns individually
+named `CommandEntry` objects and registers them explicitly; each declares its
+arguments as `constexpr CommandArg<T>` descriptors; `EnvelopeLine` reads the request
+envelope once, names the command and decodes those arguments; the handler gets typed
+values plus `ctx.in` positioned at the body; and the reply is the structured
+`ReplyWriter` plus an optional `resp.body("<media type>")` stream the framework
+frames. A command has ONE identity (`partition write`), the wire's own. `help` reads
+metadata and executes nothing.
 
-Next, each on its own and in this order:
+Proven on the bench devkit throughout: `help describe` for all 24 commands is
+byte-identical to the capture taken before any of it.
 
-1. **Rename `RequestError` to `CommandResult`.** The rename only -- `Described` is what
-   made the old name wrong, and it is gone. Do not collapse or add values yet.
-2. **Reply framing.** `reply.body(contentType)` seals the structured part and returns
-   the existing `Stream`, so no handler writes a newline or touches `ctx.out`; progress
-   stays ordinary multiple records, with an explicit flush where one is wanted.
-3. **Replace the per-manager `commands_[N]` arrays with individually named
-   `CommandEntry` objects**, registered explicitly by the owning manager the way
-   `SettingsManager::Register({ &a, &b })` already registers settings. No
-   `CommandTable` abstraction, no static or self-registration magic.
-4. **Collapse `category` + `name` into the single identity the wire already carries.**
-   Grouping (for `help`) and permission grouping (for `AuthGate`) are separate
-   questions from identity and stay where they are useful.
-
-Loose end for step 2: `protocol::MAX_ENVELOPE` still lives in `CommandContext.h`, which
-after the deletion has nothing else to do with parsing. It belongs beside
-`EnvelopeLine`; moving it was left out of the deletion commit as unrelated churn.
+Two things deliberately NOT done, and tracked as issues rather than folded in:
+[#42](https://github.com/vanBassum/Strux/issues/42) (stale `partition write` prose),
+[#43](https://github.com/vanBassum/Strux/issues/43) (`partition read` FINALs after a
+truncated body -- this is the one place a result value beyond today's set would earn
+itself) and [#44](https://github.com/vanBassum/Strux/issues/44) (`\n` decodes as the
+letter `n`; `args_detail::Unescape` replicates it byte for byte on purpose).
 
 **A device describes itself, and an agent can drive it through the relay.** Commands
 carry a one-line description and describe each argument; `help describe` returns the
