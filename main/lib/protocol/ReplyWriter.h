@@ -3,13 +3,12 @@
 #include "Fatal.h"
 #include <cstdint>
 
-// The reply half of the handler's contract, mirroring ArgReader on the request side:
-// a handler names the SHAPE of what it is writing and never names the wire format.
+// The reply half of the handler's contract, mirroring the argument decoder on the
+// request side: a handler names the SHAPE of what it is writing and never names the
+// wire format.
 //
 //     RequestError Cmd_Info(CommandContext& ctx)
 //     {
-//         RETURN_IF_ERROR(ctx.readArgs());
-//
 //         auto resp = ctx.reply.object();
 //         resp.field("name", deviceName);
 //         resp.field("heapFree", esp_get_free_heap_size());

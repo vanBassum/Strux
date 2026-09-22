@@ -1,7 +1,6 @@
 #include "CommandManager.h"
-#include "JsonArgReader.h"
+#include "EnvelopeLine.h"
 #include "JsonReplyWriter.h"
-#include "DescribeArgReader.h"
 #include "Stream.h"
 #include "esp_log.h"
 #include <cstdio>
@@ -39,22 +38,19 @@ RequestError CommandManager::Execute(const char* category, const char* name,
     // Handler runs OUTSIDE the lock: entries are immortal, so the pointer
     // stays valid, and a handler may register commands or dispatch nested
     // commands without deadlocking.
-    // Parse the arguments first, so the handler receives them already validated and
-    // `in` already positioned at the body. JsonArgs is the only thing in the request
-    // path holding a request-sized buffer — swapping in a token implementation here
-    // deletes it without touching a single handler.
-    JsonArgReader reader(in);
+    //
+    // Reading the envelope line is what leaves `in` at the body, so it happens for
+    // every command whether or not it takes arguments. The decode against the
+    // command's declarations then happens before the handler runs, which is why a
+    // handler has no prologue and receives its arguments already validated.
+    EnvelopeLine envelope(in);
     JsonReplyWriter writer(out);
 
-    // A command that declares its arguments statically gets them decoded here, before
-    // its handler runs; one that has not been converted yet still pulls them itself
-    // through the reader. Both read the same consumed envelope line, so the two paths
-    // cost one buffer between them and never both run for one command.
     ArgValues values;
     if (e->args[0] != nullptr)
     {
         const char* failed = nullptr;
-        const RequestError err = DecodeJsonArgs(reader.envelope(), e->args, values, failed);
+        const RequestError err = DecodeJsonArgs(envelope.text(), e->args, values, failed);
         if (err != RequestError::Ok)
         {
             if (failedArg) *failedArg = failed;
@@ -62,11 +58,8 @@ RequestError CommandManager::Execute(const char* category, const char* name,
         }
     }
 
-    CommandContext ctx(reader, writer, in, out, connection, e->args, &values);
-    const RequestError err = e->handler(e->ctx, ctx);
-    if (err != RequestError::Ok && failedArg)
-        *failedArg = reader.failedArgument();
-    return err;
+    CommandContext ctx(writer, in, out, e->args, values, connection);
+    return e->handler(e->ctx, ctx);
 }
 
 const char* DescribeRequestError(RequestError e, const char* arg, char* buf, size_t cap)
@@ -85,7 +78,6 @@ const char* DescribeRequestError(RequestError e, const char* arg, char* buf, siz
     case RequestError::ArgumentTooLong:
         snprintf(buf, cap, "argument too long: %s", arg ? arg : "?");
         return buf;
-    case RequestError::Described:  return "described";   // help swallows this
     }
     return "bad request";
 }
@@ -129,20 +121,6 @@ CommandEntry CommandManager::commands_[2] = {
       "and full argument declarations - in one reply.",
       { &describeCategoryArg } },
 };
-
-namespace {
-
-// The streams the described handler gets. It is stopped at its readArgs call, so
-// these exist to be unused — and to mean that a handler which somehow reaches its
-// body writes to nobody instead of to the client.
-class NullStream final : public Stream
-{
-public:
-    size_t write(const void*, size_t size, TickType_t = portMAX_DELAY) override { return size; }
-    size_t read(void*, size_t, TickType_t = portMAX_DELAY) override { return 0; }
-};
-
-} // namespace
 
 RequestError CommandManager::Cmd_Help(CommandContext& ctx)
 {

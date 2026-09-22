@@ -11,8 +11,8 @@
 // no state beyond the stream — every byte goes straight out, and a reply of any size
 // costs the same nothing that JsonScope already cost.
 //
-// It is the mirror of JsonArgReader, and the reason a handler can be written without
-// naming a wire format. Unlike that one it has no buffer to delete: the reply side was
+// It is the mirror of DecodeJsonArgs, and the reason a handler can be written without
+// naming a wire format. Unlike that one it holds no buffer at all: the reply side was
 // never the place the RAM went.
 class JsonReplyWriter final : public ReplyWriter
 {

@@ -20,110 +20,28 @@ namespace protocol
     // arguments were enough to cross it.
     //
     // Both buffers are stack, on the task running the command, and they are not
-    // live at the same time: the router's frame is gone before a handler builds
-    // its reader.
+    // live at the same time: the router's frame is gone before EnvelopeLine
+    // reads its own.
     inline constexpr size_t MAX_ENVELOPE = 512;
 }
 
 // Everything a command handler gets: its arguments, its request body, its reply.
 //
-//     RequestError Cmd_Read(CommandContext& ctx)
+//     RequestError PartitionManager::Cmd_ClearPartition(CommandContext& ctx)
 //     {
-//         char     partition[17] = {};
-//         uint32_t address = 0, length = 0;
-//         bool     ascii = false;
-//
-//         RETURN_IF_ERROR(ctx.readArgs(
-//             Required("partition", partition),
-//             Required("address",   address),
-//             Required("length",    length),
-//             Optional("ascii",     ascii)
-//         ));
-//         // ctx.in is now positioned at the body (which may be empty).
+//         const char* label = ctx.arg(partitionArg);
+//         ...
 //     }
 //
-// Declaring every argument in ONE call is what makes the parse zero-buffer: the
-// reader takes a name/value pair off the stream, finds which destination it belongs
-// to, writes into it, and keeps nothing. Arbitrary order costs nothing, because
-// nothing has to be remembered for a later question. Asking one at a time is what
-// used to force a buffer — the parser had to answer questions it had not been asked.
-//
-// It is also the end-of-arguments marker, so there is no separate call to forget:
-// under `help` the reader prints the declarations instead of filling them and returns
-// a sentinel, so the handler's body is never reached. A handler that never calls
-// readArgs has no arguments at all, which breaks the first time it is used.
+// Arguments are already parsed and validated by the time a handler runs, and `in` is
+// already positioned at the body. A handler therefore has no prologue: it cannot
+// forget to read its arguments, and there is nothing it can do first that `help`
+// depends on. Commands declare what they take in their CommandEntry (see
+// CommandArgs.h), which is also where `help` reads it from.
 //
 // The framework validates FORM — is a required argument present, is that number a
 // number. The handler validates MEANING — is that address inside this partition.
 // Form failures become a REJECT; meaning goes in the reply, where it can carry data.
-
-// RequestError, ArgType, Presence, ArgDesc, CommandArg and the JSON decoder live in
-// CommandArgs.h -- they name no layer and pull in nothing, so they are verified on the
-// host. What stays here is the handler's view of a request: its arguments, its body,
-// its reply.
-
-
-/// One declared argument: where to put it and whether it may be absent. Type-erased
-/// on purpose — the variadic layer builds an array of these and hands it to one
-/// ordinary function, so a command does not instantiate its own copy of the parser.
-struct ArgSpec
-{
-    const char* name;
-    void*       dst;
-    size_t      cap;       // strings only
-    ArgType     type;
-    bool        required;
-
-    /// What this argument MEANS, for whoever has to compose a call without reading
-    /// the source — a person at `help`, or a model at the other end of the relay's
-    /// MCP surface. A name and a type say how to spell a value, never which one:
-    /// `address` is a uint32 in both a partition write and a WiFi command.
-    ///
-    /// Optional, a string literal, and read only by DescribeArgReader, so an
-    /// undescribed argument costs a null pointer and nothing on the wire. Units,
-    /// ranges and defaults belong here — they are the part a caller cannot guess.
-    const char* help = nullptr;
-};
-
-// Capacity is deduced from the array, so `sizeof` never appears at a call site.
-template <size_t N>
-inline ArgSpec Required(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, true, help }; }
-inline ArgSpec Required(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, true, help }; }
-inline ArgSpec Required(const char* name, int32_t& dst, const char* help = nullptr)   { return { name, &dst, 0, ArgType::Int32,  true, help }; }
-inline ArgSpec Required(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   true, help }; }
-
-template <size_t N>
-inline ArgSpec Optional(const char* name, char (&dst)[N], const char* help = nullptr) { return { name, dst, N, ArgType::String, false, help }; }
-inline ArgSpec Optional(const char* name, uint32_t& dst, const char* help = nullptr)  { return { name, &dst, 0, ArgType::UInt32, false, help }; }
-inline ArgSpec Optional(const char* name, int32_t& dst, const char* help = nullptr)   { return { name, &dst, 0, ArgType::Int32,  false, help }; }
-inline ArgSpec Optional(const char* name, bool& dst, const char* help = nullptr)      { return { name, &dst, 0, ArgType::Bool,   false, help }; }
-
-/// Reads a request's arguments off a stream. One implementation per wire format; a
-/// handler never learns which one it got.
-class ArgReader
-{
-public:
-    virtual ~ArgReader() = default;
-
-    /// Fill the declared destinations and leave the stream at the first body byte.
-    ///
-    /// An argument that was not declared is currently IGNORED. Refusing one is the
-    /// behaviour we want, but it belongs with a reader whose format makes an undeclared
-    /// argument unambiguous; in the JSON envelope it needs a quote- and depth-aware key
-    /// scan for a benefit that is thin while the only client is the generated frontend.
-    /// See docs/reasoning/ on the console format being parked.
-    ///
-    /// An absent Optional leaves its destination alone, so the caller's initialiser
-    /// stands as the default.
-    virtual RequestError read(const ArgSpec* specs, size_t count) = 0;
-
-    /// Which argument a failure was about, for the refusal text. Names are string
-    /// literals, so this costs nothing to keep.
-    const char* failedArgument() const { return failed_; }
-
-protected:
-    const char* failed_ = nullptr;
-};
 
 /// The authentication state of the connection a request arrived on, lent by the
 /// transport. Per-connection state is transport-specific — a socket has one shape, an
@@ -146,22 +64,19 @@ public:
 class CommandContext
 {
 public:
-    /// `args` is the command's declaration list, null-terminated, and `values` what a
-    /// decoder made of the request against it. Both are null for a command that has
-    /// not declared its arguments statically yet, which is the only reason `reader`
-    /// and readArgs() below still exist.
-    CommandContext(ArgReader& reader, ReplyWriter& writer,
-                   Stream& request, Stream& response,
-                   ConnectionAuth* connection = nullptr,
-                   const ArgDesc* const* args = nullptr,
-                   const ArgValues* values = nullptr)
+    /// `args` is the command's declaration list, null-terminated; `values` is what a
+    /// decoder made of the request against it. Both come from the dispatcher and
+    /// outlive the handler.
+    CommandContext(ReplyWriter& writer, Stream& request, Stream& response,
+                   const ArgDesc* const* args, const ArgValues& values,
+                   ConnectionAuth* connection = nullptr)
         : in(request), out(response), reply(writer),
-          connection(connection), reader_(reader), args_(args), values_(values) {}
+          connection(connection), args_(args), values_(values) {}
 
     CommandContext(const CommandContext&) = delete;
     CommandContext& operator=(const CommandContext&) = delete;
 
-    Stream& in;    ///< request body, positioned there by readArgs
+    Stream& in;    ///< request body, the stream already positioned there
     Stream& out;   ///< reply, as raw bytes
 
     /// The reply as structure: `auto resp = ctx.reply.object();`. Writes through to
@@ -181,8 +96,7 @@ public:
     {
         const int i = indexOf(a);
         assert(i >= 0 && "command reads an argument it did not declare");
-        return values_ != nullptr ? values_->get<T>(static_cast<size_t>(i))
-                                  : ArgValues{}.get<T>(0);
+        return values_.get<T>(static_cast<size_t>(i));
     }
 
     /// Did the caller supply it? Only ever interesting for an optional argument, and
@@ -190,45 +104,22 @@ public:
     bool has(const ArgDesc& a) const
     {
         const int i = indexOf(a);
-        return i >= 0 && values_ != nullptr && values_->has(static_cast<size_t>(i));
+        return i >= 0 && values_.has(static_cast<size_t>(i));
     }
-
-    /// Declare and read every argument at once. Call it even with none — it is what
-    /// advances the stream to the body and what stops a handler under `help`.
-    ///
-    /// The path for commands not yet converted to static declarations. It goes away
-    /// with the last of them; a converted handler uses arg()/has() above and the
-    /// framework has already decoded by the time it runs.
-    template <typename... Specs>
-    RequestError readArgs(Specs... specs)
-    {
-        ArgSpec list[] = { specs... };
-        return reader_.read(list, sizeof...(specs));
-    }
-
-    RequestError readArgs() { return reader_.read(nullptr, 0); }
-
-    const char* failedArgument() const { return reader_.failedArgument(); }
 
 private:
-    ArgReader& reader_;
-
     const ArgDesc* const* args_;
-    const ArgValues*      values_;
+    const ArgValues&      values_;
 
     /// Which slot this declaration occupies, by identity rather than by name: the
     /// entry stores the address of the very object the handler reads.
     int indexOf(const ArgDesc& a) const
     {
-        if (args_ == nullptr) return -1;
         for (int i = 0; args_[i] != nullptr; ++i)
             if (args_[i] == &a) return i;
         return -1;
     }
 };
-
-#define RETURN_IF_ERROR(expr) do { RequestError e_ = (expr);                   \
-                                   if (e_ != RequestError::Ok) return e_; } while (0)
 
 /// Human-readable form of a request failure, for the REJECT payload. Written by the
 /// framework — handlers never compose error text.

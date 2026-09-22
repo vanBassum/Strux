@@ -35,7 +35,7 @@ struct CommandEntry
     /// Optional and defaulted, so an existing table compiles unchanged — but a
     /// command without one is a command an operator, or a model reaching this device
     /// through the relay, can only guess at. The arguments describe themselves (see
-    /// ArgSpec::help); this is the sentence the arguments are arguments TO.
+    /// ArgDesc::description); this is the sentence the arguments are arguments TO.
     ///
     /// A string literal, never composed: the table is static storage and nothing
     /// frees it. Keep it short — a second sentence for a caveat is fine, a paragraph

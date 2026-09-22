@@ -10,8 +10,8 @@
 //
 // Each argument is a `constexpr CommandArg<T>` living beside the handler that reads
 // it; the command's entry names the ones it takes. Nothing here is executed to be
-// read, which is the whole point: `help` walks these declarations instead of
-// re-dispatching the handler with a reader that prints instead of filling.
+// read, which is the whole point: `help` walks these declarations, where it used to
+// re-dispatch the handler with a reader that printed instead of filling.
 //
 //     constexpr CommandArg<const char*> labelArg{
 //         "partition", "Label of the partition, as 'partition list' reports it.", 16 };
@@ -39,15 +39,6 @@ enum class RequestError : uint8_t
     MalformedNumber,
     ArgumentTooLong,
     MalformedRequest,
-
-    /// Not a failure, and the one value a wire reader never produces: `help` swaps in
-    /// a reader that prints the declarations instead of filling them, and this is how
-    /// it stops the handler at its own RETURN_IF_ERROR before the body runs. It never
-    /// escapes the help command, which turns it back into Ok.
-    ///
-    /// Only commands that have not yet declared their arguments statically still go
-    /// through that path; it disappears with the last of them.
-    Described,
 };
 
 enum class ArgType : uint8_t { String, UInt32, Int32, Float, Bool };
