@@ -195,5 +195,6 @@ private:
     // The device's proof that it is the id it claims. Empty â†’ generated on first
     // Init and stored, so the secret is created here and never travels except
     // inside TLS. There is no serverâ†’device message that can set it.
-    inline static StringSetting token_setting_{ "relay.token", "Relay Device Token", "" };
+    inline static StringSetting token_setting_{ "relay.token", "Relay Device Token", "",
+                                                 SettingFlags::Hidden | SettingFlags::Secret };
 };

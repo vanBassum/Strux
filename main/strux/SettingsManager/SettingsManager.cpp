@@ -37,8 +37,9 @@ constexpr CommandArg<const char*> valueArg{
 CommandEntry SettingsManager::listCommand_{
     "settings list", &InvokeCommand<&SettingsManager::Cmd_GetSettings>,
     "List every setting registered on this device with its key, label, type "
-    "and current value. This is the whole configuration surface - there are "
-    "no hidden keys."
+    "and current value. This is the whole configuration surface. A setting may "
+    "carry 'hidden' or 'secret' as hints for whatever displays it; the value is "
+    "reported either way."
 };
 
 CommandEntry SettingsManager::setCommand_{
@@ -235,6 +236,8 @@ CommandResult SettingsManager::Cmd_GetSettings(CommandContext& ctx)
         o.field("key", s.key);
         o.field("label", s.label);
         o.field("type", SettingTypeToString(s.type));
+        if (s.flags & SettingFlags::Hidden) o.field("hidden", true);
+        if (s.flags & SettingFlags::Secret) o.field("secret", true);
 
         switch (s.type)   // NO default → new SettingType values must be handled here
         {
