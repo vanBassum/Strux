@@ -13,7 +13,10 @@ like it reverses an earlier decision. The relay server lives in its own reposito
 (vanBassum/strux-relay) and is not visible to you; the wire protocol between them is
 described in `CLAUDE.md`.
 
-There are no automated tests and CI cannot run the firmware. Judge from the code.
+CI builds both boards, typechecks and tests the frontend (`pnpm test`), and runs host
+tests in `test/` over the pure headers in `main/lib/`. It cannot run the firmware
+itself, so judge device behaviour from the code. Those CI checks must pass before a PR
+merges; don't re-report what a compiler or test already catches.
 
 ## How to review
 
