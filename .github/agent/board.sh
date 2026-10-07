@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Puts an issue on the Strux pipeline board and sets its Status column.
-#   board.sh <issue-number> <Idle|Analysis|Plan review|Build|Acceptation>
-# Needs GH_TOKEN with the `project` scope (the AGENT_PAT secret): GITHUB_TOKEN
-# cannot reach a user-owned project.
+# The pipeline board is the state: this reads and moves an issue's Status card.
+#   board.sh <issue> <Idle|Analysis|Plan review|Build|Acceptation>   move it
+#   board.sh <issue> get                                            print its Status
+# PROJECT_ID is the board's node id (repo variable PIPELINE_PROJECT_ID). GH_TOKEN
+# needs `repo` + `project` (AGENT_PAT). Adding is idempotent, so an issue not yet
+# on the board is put there.
 set -euo pipefail
 issue=$1 status=$2
-owner=vanBassum project=9
-project_id=PVT_kwHOAk5Bhs4BmDnx
-field_id=PVTSSF_lAHOAk5Bhs4BmDnxzhkuFvg
-case $status in
-  Idle)          option=5563906c ;;
-  Analysis)      option=5f73d7b4 ;;
-  "Plan review") option=63538ef1 ;;
-  Build)         option=4f816c52 ;;
-  Acceptation)   option=2e100057 ;;
-  *) echo "::error::Unknown status '$status'"; exit 1 ;;
-esac
-# item-add is idempotent: an issue already on the board returns its existing item.
-item=$(gh project item-add "$project" --owner "$owner" \
-  --url "https://github.com/$GITHUB_REPOSITORY/issues/$issue" --format json --jq .id)
-gh project item-edit --id "$item" --project-id "$project_id" \
-  --field-id "$field_id" --single-select-option-id "$option" > /dev/null
+: "${PROJECT_ID:?set the PIPELINE_PROJECT_ID repository variable}"
+content=$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
+item=$(gh api graphql -f query='mutation($p:ID!,$c:ID!){addProjectV2ItemById(input:{projectId:$p,contentId:$c}){item{id}}}' \
+  -f p="$PROJECT_ID" -f c="$content" --jq .data.addProjectV2ItemById.item.id)
+if [ "$status" = get ]; then
+  gh api graphql -f query='query($i:ID!){node(id:$i){... on ProjectV2Item{fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}' \
+    -f i="$item" --jq '.data.node.fieldValueByName.name // ""'
+  exit 0
+fi
+read -r field option < <(gh api graphql -f query='query($p:ID!){node(id:$p){... on ProjectV2{field(name:"Status"){... on ProjectV2SingleSelectField{id options{id name}}}}}}' \
+  -f p="$PROJECT_ID" --jq ".data.node.field | .id + \" \" + (.options[] | select(.name == \"$status\") | .id)")
+[ -n "${option:-}" ] || { echo "::error::No Status option '$status' on the board"; exit 1; }
+gh api graphql -f query='mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){updateProjectV2ItemFieldValue(input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}}){projectV2Item{id}}}' \
+  -f p="$PROJECT_ID" -f i="$item" -f f="$field" -f o="$option" > /dev/null
 echo "Issue #$issue -> $status"
