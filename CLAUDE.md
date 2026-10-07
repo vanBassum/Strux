@@ -10,7 +10,7 @@ Strux is a template/foundation for ESP32 firmware (ESP-IDF v6.0, C++, FreeRTOS) 
 
 `main` is protected: nothing is pushed to it directly, admins included. All work happens on a branch (`feature/…`, `fix/…`, `docs/…`) and reaches `main` as a pull request, squash-merged. Five Claude reviewers ([.github/workflows/claude-review.yml](.github/workflows/claude-review.yml), rules in `.github/reviewers/`) run on every non-draft PR and merge it themselves when none reports a blocking finding; label a PR `no-automerge` to keep it open, and a PR touching `.github/workflows/` or `.github/reviewers/` is always merged by hand.
 
-Issues can also be worked by Claude itself, driven from the "Strux pipeline" project board (Idle → Analysis → Plan review → Build → Acceptation): dragging a card into Analysis or Build starts [issue-agent.yml](.github/workflows/issue-agent.yml), and the agent moves the card on. Board events reach Actions only through the small webhook bridge in `.github/agent/bridge/`, because GitHub emits them for organization projects only and never to an Action directly. The agent never changes `.github/`.
+Issues can also be worked by Claude itself ([issue-agent.yml](.github/workflows/issue-agent.yml)): adding `stage:analysis` makes Claude post a plan, adding `stage:build` makes it implement the plan and open a PR, and the "Strux pipeline" project board (Idle → Analysis → Plan review → Build → Acceptation) is kept in step with those labels automatically. Labels are the trigger because a user-owned project emits no event an Action can run on. The agent never changes `.github/`.
 
 ## Build commands
 

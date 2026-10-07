@@ -4,7 +4,7 @@
 #   publish.sh fix     push one fix round onto the open PR
 # Claude reports through /tmp/agent/result.md: first line READY or BLOCKED, the
 # rest is the PR description (READY) or the reason (BLOCKED). Anything other than
-# a READY with new commits that leave .github/ alone moves the card back to Idle.
+# a READY with new commits that leave .github/ alone returns the issue to Idle.
 set -uo pipefail
 mode=$1 R=$GITHUB_REPOSITORY
 run_url="$GITHUB_SERVER_URL/$R/actions/runs/$GITHUB_RUN_ID"
@@ -15,7 +15,7 @@ idle() {
   { echo "**Agent stopped ($mode) -- back to Idle.**"; echo; echo "$1"; echo; echo "[Run]($run_url)"; } > /tmp/agent/idle.md
   gh issue comment "$ISSUE" --repo "$R" --body-file /tmp/agent/idle.md
   [ "$mode" = fix ] && gh pr edit "$BRANCH" --repo "$R" --add-label no-automerge
-  bash "$(dirname "$0")/board.sh" "$ISSUE" Idle
+  gh issue edit "$ISSUE" --repo "$R" --remove-label stage:build
   exit 0
 }
 
