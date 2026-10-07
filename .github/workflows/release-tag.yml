@@ -1,0 +1,84 @@
+name: Release tag
+
+# The two human steps of a release, as buttons (Actions -> Release tag -> Run workflow):
+#
+#   candidate  1.2.0   tags the tip of `dev` as the next v1.2.0-rc.N
+#   final      1.2.0   promotes the LATEST v1.2.0-rc.N: tags that same commit v1.2.0
+#                      and fast-forwards `main` to it
+#
+# Branches and tags:  agent/issue-* --squash--> dev --tag--> v1.2.0-rc.N --same commit--> v1.2.0 = main
+#
+# Nothing is rebuilt from different code: a final release is the commit its last
+# RC was, and main is moved TO that commit, never merged into. An RC that needs
+# fixing is not patched: the fix goes through the normal issue path into dev, and
+# the next candidate is rc.N+1.
+#
+# The tag is pushed with AGENT_PAT, because a tag pushed with GITHUB_TOKEN starts no
+# workflow, and release.yml (which builds, publishes and moves the issues) runs on
+# the tag. main's protection requires CI to have passed on the commit; CI runs on
+# every push to dev, so a candidate that went red cannot be promoted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "candidate = tag dev as the next RC; final = promote the latest RC"
+        type: choice
+        options: [candidate, final]
+        required: true
+      version:
+        description: "Version without the v, e.g. 1.2.0"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+
+      - env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          KIND: ${{ inputs.kind }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Version must look like 1.2.0"; exit 1; }
+          final="v$VERSION"
+          git rev-parse -q --verify "refs/tags/$final" >/dev/null && { echo "::error::$final is already released"; exit 1; }
+          remote="https://x-access-token:${GH_TOKEN}@github.com/$GITHUB_REPOSITORY.git"
+          git config user.name "strux-agent"; git config user.email "noreply@anthropic.com"
+          last_rc=$(git tag -l "$final-rc.*" | sort -V | tail -n1)
+
+          if [ "$KIND" = candidate ]; then
+            commit=$(git rev-parse origin/dev)
+            already=$(git tag --points-at "$commit" | grep -E -- '-rc\.[0-9]+$' || true)
+            [ -z "$already" ] || { echo "::error::dev has nothing new since $already"; exit 1; }
+            n=$(( ${last_rc##*-rc.} + 0 )); [ -n "$last_rc" ] || n=0
+            tag="$final-rc.$((n + 1))"
+          else
+            [ -n "$last_rc" ] || { echo "::error::No release candidate for $final yet"; exit 1; }
+            commit=$(git rev-parse "$last_rc^{commit}")
+            git merge-base --is-ancestor origin/main "$commit" \
+              || { echo "::error::main is not an ancestor of $last_rc, so it cannot fast-forward"; exit 1; }
+            # main first: if its protection refuses (CI not green on this commit),
+            # no tag is made and nothing is half-released.
+            git push "$remote" "$commit:refs/heads/main"
+            tag=$final
+            echo "Promoting $last_rc ($commit)"
+          fi
+
+          git tag -a "$tag" -m "$tag" "$commit"
+          git push "$remote" "refs/tags/$tag"
+          echo "### Tagged \`$tag\` at \`${commit:0:10}\`" >> "$GITHUB_STEP_SUMMARY"

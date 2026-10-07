@@ -11,14 +11,19 @@ on:
   push:
     branches:
       - main
+      - dev
   pull_request:
   workflow_dispatch: {}
 
-# A second push supersedes the first. Nobody wants the result for a commit that
-# has already been replaced, and the firmware legs are the slow part.
+# A second push to a PR supersedes the first. Nobody wants the result for a commit
+# that has already been replaced, and the firmware legs are the slow part. A push to
+# dev or main is NOT cancelled: any dev commit may be tagged as a release candidate,
+# and promoting it fast-forwards main, whose protection requires these checks to
+# have passed on that exact commit. (Grouped per commit there, because a group keeps
+# only one PENDING run and would silently drop the one in between.)
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IDF_VERSION: "v6.0"
