@@ -2,7 +2,11 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.16)
 
-# Derive version from git tag (v0.1.0 -> 0.1.0), fallback to 0.0.0-dev
+# Derive version from git tag (v0.1.0 -> 0.1.0), fallback to 0.0.0-dev.
+# A release candidate builds as the version it is a candidate FOR (v1.2.0-rc.2 ->
+# 1.2.0): the final release ships the RC's binary unchanged, so the binary must
+# already carry the final version. Which RC a device runs is told by the commit
+# below, not by the version string.
 execute_process(
     COMMAND git describe --tags --abbrev=0
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -11,7 +15,9 @@ execute_process(
     ERROR_QUIET
     RESULT_VARIABLE GIT_TAG_RESULT
 )
-if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^v(.+)$")
+if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)-rc\\.[0-9]+$")
+    set(PROJECT_VER "${CMAKE_MATCH_1}")
+elseif(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG MATCHES "^v(.+)$")
     set(PROJECT_VER "${CMAKE_MATCH_1}")
 else()
     set(PROJECT_VER "0.0.0-dev")
