@@ -155,12 +155,8 @@ jobs:
           set -euo pipefail
           rc=$(git tag --points-at "$TAG^{commit}" | grep -E -- '-rc\.[0-9]+$' | sort -V | tail -n1)
           [ -n "$rc" ] || { echo "::error::No release candidate on this commit; a final release ships an RC's binaries"; exit 1; }
+          bash .github/agent/release-assets.sh "$rc"
           gh release download "$rc" --repo "$GITHUB_REPOSITORY" --dir dist --pattern '*.bin'
-          for b in $(ls main/hardware/boards); do
-            for f in "$PROJECT_NAME-$b-factory.bin" "$PROJECT_NAME-$b-app.bin"; do
-              [ -f "dist/$f" ] || { echo "::error::$rc has no $f"; exit 1; }
-            done
-          done
           echo "FROM_RC=$rc" >> "$GITHUB_ENV"
 
       # The issues this tag ships, by ancestry of their agent PR's merge commit.

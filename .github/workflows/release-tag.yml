@@ -70,9 +70,6 @@ jobs:
           final="v$VERSION"
           git rev-parse -q --verify "refs/tags/$final" >/dev/null && { echo "::error::$final is already released"; exit 1; }
           git config user.name "strux-release"; git config user.email "noreply@anthropic.com"
-          # The file names release.yml builds: <project>-<board>-{factory,app}.bin.
-          project=$(grep -oP "^project\(\K[A-Za-z0-9_-]+(?=\))" CMakeLists.txt || true)
-          [ -n "$project" ] || { echo "::error::No project() name in CMakeLists.txt"; exit 1; }
           last_rc=$(git tag -l "$final-rc.*" | grep -E -- '-rc\.[0-9]+$' | sort -V | tail -n1 || true)
 
           ci_green() {  # the CI run for a push of exactly this commit succeeded
@@ -98,14 +95,7 @@ jobs:
 
             # The RC must be a PUBLISHED release with the full file set: the final
             # release ships those files, it does not build its own.
-            gh release view "$last_rc" --repo "$R" --json isDraft --jq .isDraft | grep -qx false \
-              || { echo "::error::$last_rc has no published release (did its build fail?)"; exit 1; }
-            assets=$(gh release view "$last_rc" --repo "$R" --json assets --jq '.assets[].name')
-            for b in $(ls main/hardware/boards); do
-              for f in "$project-$b-factory.bin" "$project-$b-app.bin"; do
-                grep -qx "$f" <<<"$assets" || { echo "::error::$last_rc is missing $f"; exit 1; }
-              done
-            done
+            bash .github/agent/release-assets.sh "$last_rc"
 
             ci_green "$commit"
             git merge-base --is-ancestor origin/main "$commit" \
