@@ -55,17 +55,12 @@ private:
     // ── Commands (registered with CommandManager in Init) ──
     CommandResult Cmd_UpdateStatus(CommandContext& ctx);
     CommandResult Cmd_Partitions(CommandContext& ctx);
-    /// Streamed upload: header line + body. `offset` is optional and decides which
-    /// of two modes this is:
+    /// Streamed upload: header line + body. `offset` is the start address, default 0.
+    /// Writes exactly where told, erases nothing, activates nothing. The sender
+    /// calls clearPartition first and activatePartition after the last piece, and
+    /// may leave gaps between pieces for other traffic.
     ///
-    ///   absent  — one shot. Erase as we go from zero and activate at the end; the
-    ///             whole image in a single command, which is what the web UI sends.
-    ///   present — one piece of a caller-driven upload. Writes exactly where told,
-    ///             erases nothing, activates nothing. The sender calls
-    ///             clearPartition first and activatePartition after the last piece,
-    ///             and may leave gaps between pieces for other traffic.
-    ///
-    /// The second mode exists because a single command that runs for tens of seconds
+    /// Pieces exist because a single command that runs for tens of seconds
     /// monopolises the transport, which is what the relay's in-flight timeout trips
     /// over. Many short commands need no concurrency support to coexist with others.
     CommandResult Cmd_WritePartition(CommandContext& ctx);

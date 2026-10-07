@@ -39,11 +39,10 @@ constexpr CommandArg<const char*> writePartitionArg{
                  "The running app slot is always refused.", LABEL_MAX };
 
 constexpr CommandArg<uint32_t> offsetArg{
-    "offset", "Byte offset to write at. Omit it for a one-shot upload - the "
-              "whole image in one command, erased and activated by the device. "
-              "Giving one (including 0) means you are driving the upload in "
-              "pieces and own the 'partition clear' and 'partition activate' "
-              "steps yourself.", Presence::Optional };
+    "offset", "Byte offset to write at. Default 0. Use it to send an image in "
+              "several pieces, each its own command. The write never erases or "
+              "activates: run 'partition clear' before the first piece and "
+              "'partition activate' after the last.", Presence::Optional };
 
 constexpr CommandArg<bool> restartArg{
     "restart", "true to reboot into it now. Default false, which leaves the "
@@ -70,7 +69,8 @@ CommandEntry PartitionManager::writeCommand_{
     "partition write", &InvokeCommand<&PartitionManager::Cmd_WritePartition>,
     "Write an image to a partition. The bytes follow the request envelope in "
     "the same channel, so this is a streaming upload rather than an argument. "
-    "Destructive: it overwrites what the device boots or serves.",
+    "Never erases or activates. Destructive: it overwrites what is in the "
+    "partition, so 'partition clear' it first and 'partition activate' it after.",
     { &writePartitionArg, &offsetArg }
 };
 
@@ -265,8 +265,9 @@ CommandResult PartitionManager::Cmd_Partitions(CommandContext& ctx)
 }
 
 // ──────────────────────────────────────────────────────────────
-// Streamed upload — one command carries the whole image.
-// Envelope: {"type":"writePartition","partition":"<label>"}\n<bytes…>
+// Streamed upload — the body is written at `offset` (default 0). Nothing is
+// erased and nothing is activated; the caller owns 'partition clear' before and
+// 'partition activate' after.
 // ──────────────────────────────────────────────────────────────
 
 CommandResult PartitionManager::Cmd_WritePartition(CommandContext& ctx)
@@ -355,8 +356,8 @@ CommandResult PartitionManager::Cmd_WritePartition(CommandContext& ctx)
 }
 
 // ──────────────────────────────────────────────────────────────
-// Chunked-upload steps — the two halves the one-shot path does implicitly, so a
-// sender can drive an upload as many short channels instead of one long one.
+// Chunked-upload steps — the erase before and the activation after a write, which
+// the caller runs itself so an upload can be many short channels instead of one long one.
 // ──────────────────────────────────────────────────────────────
 
 // These two are the first handlers written against the console request format
