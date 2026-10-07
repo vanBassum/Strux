@@ -63,33 +63,32 @@ jobs:
         with:
           sparse-checkout: .github/agent
           persist-credentials: false
-      - name: Mirror the stage label onto the board
+      # Reads the labels as they are NOW, not from the event, and sets the board
+      # from them. GitHub keeps only one pending run per concurrency group and
+      # drops the rest, so a burst of label events must not depend on each run
+      # seeing its own event: whichever run survives sees the final state.
+      - name: Mirror the stage labels onto the board
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
           ACTION: ${{ github.event.action }}
-          LABEL: ${{ github.event.label.name }}
           ISSUE: ${{ github.event.issue.number }}
-          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
         run: |
-          board() { bash .github/agent/board.sh "$ISSUE" "$1"; }
-          stage_labels=$(jq -r '.[] | select(startswith("stage:"))' <<<"$LABELS")
-          case "$ACTION:$LABEL" in
-            opened:*)                   board Idle ;;
-            labeled:stage:analysis)     board Analysis ;;
-            labeled:stage:plan-review)  board "Plan review" ;;
-            labeled:stage:build)        board Build ;;
-            labeled:stage:acceptation)  board Acceptation ;;
-            unlabeled:stage:*)
-              # A swap adds the new label before removing the old one, so a
-              # remaining stage label means this was a swap, not a park.
-              [ -z "$stage_labels" ] && board Idle || echo "Swap, nothing to do." ;;
-            closed:*)
-              if grep -qx 'stage:build' <<<"$stage_labels"; then
-                gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label stage:acceptation
-                gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label stage:build
-              fi ;;
-            *) echo "Not a stage change." ;;
-          esac
+          R=$GITHUB_REPOSITORY
+          labels=$(gh issue view "$ISSUE" --repo "$R" --json labels --jq '.labels[].name')
+          has() { grep -qx "stage:$1" <<<"$labels"; }
+          if [ "$ACTION" = closed ] && has build; then
+            # The agent's PR merged and closed the issue.
+            gh issue edit "$ISSUE" --repo "$R" --add-label stage:acceptation --remove-label stage:build,stage:plan-review
+            labels="stage:acceptation"
+          fi
+          # The most advanced stage wins, so a leftover earlier label is harmless.
+          if   has acceptation; then status=Acceptation
+          elif has build;       then status=Build
+          elif has plan-review; then status="Plan review"
+          elif has analysis;    then status=Analysis
+          else                       status=Idle
+          fi
+          bash .github/agent/board.sh "$ISSUE" "$status"
 
   # ---------------------------------------------------------------- analysis
   analysis:
@@ -107,6 +106,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 50
+      - name: Clear the review label (a re-analysis)
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label stage:plan-review
 
       # The plan is Claude's FINAL MESSAGE, read from the action's execution log --
       # not a file, so Analysis needs no write permission at all.
@@ -137,6 +141,7 @@ jobs:
           [ -f "$EXEC" ] && jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXEC" > /tmp/agent/plan.md
           if grep -q '^## Plan' /tmp/agent/plan.md 2>/dev/null; then
             sed -i -n '/^## Plan/,$p' /tmp/agent/plan.md
+            sed -i '/<!-- agent-plan -->/d' /tmp/agent/plan.md
             { cat /tmp/agent/plan.md; echo; echo "<!-- agent-plan -->"; } > /tmp/agent/comment.md
             gh issue comment "$ISSUE" --repo "$R" --body-file /tmp/agent/comment.md
             gh issue edit "$ISSUE" --repo "$R" --add-label stage:plan-review
@@ -167,6 +172,10 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/agent/setup
       - run: git switch -C "$BRANCH"
+      - name: Clear the review label
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+        run: gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label stage:plan-review
 
       - name: Claude build
         uses: anthropics/claude-code-action@v1
