@@ -53,9 +53,11 @@ jobs:
     environment: release
     runs-on: ubuntu-latest
     steps:
+      # A checkout of MAIN (the ref this runs from), never of dev: nothing from an
+      # unreleased branch is executed while the key is in the git config. dev is
+      # only read as data (origin/dev, tags).
       - uses: actions/checkout@v4
         with:
-          ref: dev
           fetch-depth: 0
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 

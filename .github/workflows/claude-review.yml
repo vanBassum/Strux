@@ -148,7 +148,7 @@ jobs:
           files=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate \
             --jq '.[] | .filename, (.previous_filename // empty)') \
             || { echo "::error::Could not list the PR's files, not merging."; exit 1; }
-          guarded=$(grep -E '^\.github/(workflows|reviewers)/' <<<"$files" | sort -u || true)
+          guarded=$(grep -E '^\.github/(workflows|reviewers|agent)/' <<<"$files" | sort -u || true)
           if [ -n "$guarded" ]; then
             echo "Changes the review mechanism:"; echo "$guarded"
             echo "::error::Reviewers passed, but this PR changes .github/workflows/ or .github/reviewers/. Bas merges it by hand."
