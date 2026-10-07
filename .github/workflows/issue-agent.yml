@@ -1,40 +1,38 @@
 name: Issue agent
 
-# The issue pipeline, driven from the "Strux pipeline" project board:
-#   Idle -> Analysis -> Plan review -> Build -> Acceptation
+# The issue pipeline: Idle -> Analysis -> Plan review -> Build -> Acceptation.
 #
-# The BOARD is the control plane and the only state. Bas drags cards; nothing else
-# is a human input.
-#   Idle         Nothing runs and no Claude credits are spent. New issues land here.
-#   Analysis     Claude reads the issue and the code and posts a plan.  -> Plan review
-#   Plan review  Bas reads it: drag back to Analysis to redo (comment what to change),
-#                to Idle to park, to Build to approve.
-#   Build        Claude implements the plan on agent/issue-<N> and opens a PR. The
-#                existing CI, reviewers and automerge take it from there; a failed
-#                review or CI run gets up to 3 fix rounds.
-#   Acceptation  The PR merged and closed the issue. Bas accepts.
-# Anything the agent cannot finish (blocked, needs .github/, 3 rounds used) moves
-# the card back to Idle with a comment saying why.
+# The STAGE LABELS are what start work; the "Strux pipeline" project board (user
+# project #9) mirrors them and is the view, not the trigger. A user-owned project
+# emits no event an Action can run on, and a watcher or webhook bridge would be
+# infrastructure to host -- so the labels lead and dragging a card starts nothing.
 #
-# How a drag reaches this file: GitHub only emits board events for ORGANIZATION
-# projects, and only to an org webhook, never to an Action. The bridge in
-# .github/agent/bridge/ receives that webhook and sends `repository_dispatch`
-# (pipeline-stage, {stage, issue}) when a listed human moves a card into Analysis
-# or Build. The bridge filters the sender, so the agent's own moves start nothing.
+#   no stage label      Idle. Nothing runs and no Claude credits are spent.
+#   stage:analysis      Claude reads the issue and the code, posts a plan. -> plan-review
+#   stage:plan-review   Bas reads it. Re-add stage:analysis to redo, remove to park,
+#                       add stage:build to approve.
+#   stage:build         Claude implements the plan on agent/issue-<N> and opens a PR.
+#                       The existing CI, reviewers and automerge take it from there;
+#                       a failed review or CI run gets up to 3 fix rounds.
+#   stage:acceptation   The PR merged and closed the issue. Bas accepts.
+# Anything the agent cannot finish (blocked, needs .github/, 3 rounds used) drops
+# the issue back to Idle with a comment saying why.
 #
-# Tokens: Claude itself only gets the read-mostly GITHUB_TOKEN. Pushing, opening
-# PRs, comments and the board use AGENT_PAT (classic PAT, `repo` + `project`) in
-# shell steps after Claude is done. A PR opened with GITHUB_TOKEN starts no
-# workflows, and GITHUB_TOKEN cannot reach a project.
+# Only the repository owner adding a label starts Claude: anyone can open an issue
+# on this public repo, and an issue body is untrusted input.
+#
+# Tokens: Claude itself only ever gets the read-mostly GITHUB_TOKEN. Pushing,
+# opening PRs, labels and the board use AGENT_PAT (a classic PAT with `repo` and
+# `project`), in plain shell steps after Claude is done. The PAT is needed because
+# a PR opened or pushed with GITHUB_TOKEN starts no workflows -- CI and the
+# reviewers would never run -- and GITHUB_TOKEN cannot reach a user-owned project.
 #
 # Build never changes .github/: that is the review mechanism's trust boundary
 # (see claude-review.yml). A diff that touches it is not pushed.
 
 on:
-  repository_dispatch:
-    types: [pipeline-stage]
   issues:
-    types: [opened, closed]
+    types: [opened, labeled, unlabeled, closed]
   workflow_run:
     workflows: ["Claude PR review", "CI"]
     types: [completed]
@@ -52,8 +50,7 @@ env:
   PROJECT_ID: ${{ vars.PIPELINE_PROJECT_ID }}
 
 jobs:
-  # ---------------------------------------------------------------- board upkeep
-  # New issue -> Idle; issue closed while in Build (its PR merged) -> Acceptation.
+  # ---------------------------------------------------------------- board sync
   # Plain shell, seconds of runner time, no Claude.
   board:
     if: github.event_name == 'issues'
@@ -66,28 +63,45 @@ jobs:
         with:
           sparse-checkout: .github/agent
           persist-credentials: false
-      - env:
+      - name: Mirror the stage label onto the board
+        env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
-          ISSUE: ${{ github.event.issue.number }}
           ACTION: ${{ github.event.action }}
+          LABEL: ${{ github.event.label.name }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABELS: ${{ toJSON(github.event.issue.labels.*.name) }}
         run: |
-          board() { bash .github/agent/board.sh "$ISSUE" "$@"; }
-          if [ "$ACTION" = opened ]; then
-            board Idle
-          elif [ "$(board get)" = Build ]; then
-            board Acceptation
-          fi
+          board() { bash .github/agent/board.sh "$ISSUE" "$1"; }
+          stage_labels=$(jq -r '.[] | select(startswith("stage:"))' <<<"$LABELS")
+          case "$ACTION:$LABEL" in
+            opened:*)                   board Idle ;;
+            labeled:stage:analysis)     board Analysis ;;
+            labeled:stage:plan-review)  board "Plan review" ;;
+            labeled:stage:build)        board Build ;;
+            labeled:stage:acceptation)  board Acceptation ;;
+            unlabeled:stage:*)
+              # A swap adds the new label before removing the old one, so a
+              # remaining stage label means this was a swap, not a park.
+              [ -z "$stage_labels" ] && board Idle || echo "Swap, nothing to do." ;;
+            closed:*)
+              if grep -qx 'stage:build' <<<"$stage_labels"; then
+                gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label stage:acceptation
+                gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label stage:build
+              fi ;;
+            *) echo "Not a stage change." ;;
+          esac
 
   # ---------------------------------------------------------------- analysis
   analysis:
-    if: github.event_name == 'repository_dispatch' && github.event.client_payload.stage == 'analysis'
+    if: >-
+      github.event_name == 'issues' && github.event.action == 'labeled' &&
+      github.event.label.name == 'stage:analysis' &&
+      github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: agent-issue-${{ github.event.client_payload.issue }}
+      group: agent-issue-${{ github.event.issue.number }}
       cancel-in-progress: true
-    env:
-      ISSUE: ${{ github.event.client_payload.issue }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -101,7 +115,7 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            ISSUE: ${{ github.event.client_payload.issue }}
+            ISSUE: ${{ github.event.issue.number }}
 
             Read .github/agent/analysis.md and follow it exactly.
           claude_args: |
@@ -112,28 +126,33 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          ISSUE: ${{ github.event.issue.number }}
         run: |
           R=$GITHUB_REPOSITORY
           if [ -s /tmp/agent/plan.md ]; then
             { cat /tmp/agent/plan.md; echo; echo "<!-- agent-plan -->"; } > /tmp/agent/comment.md
             gh issue comment "$ISSUE" --repo "$R" --body-file /tmp/agent/comment.md
-            bash .github/agent/board.sh "$ISSUE" "Plan review"
+            gh issue edit "$ISSUE" --repo "$R" --add-label stage:plan-review
+            gh issue edit "$ISSUE" --repo "$R" --remove-label stage:analysis
           else
             gh issue comment "$ISSUE" --repo "$R" --body "Analysis did not produce a plan ([run]($GITHUB_SERVER_URL/$R/actions/runs/$GITHUB_RUN_ID)). Back to Idle."
-            bash .github/agent/board.sh "$ISSUE" Idle
+            gh issue edit "$ISSUE" --repo "$R" --remove-label stage:analysis
           fi
 
   # ---------------------------------------------------------------- build
   build:
-    if: github.event_name == 'repository_dispatch' && github.event.client_payload.stage == 'build'
+    if: >-
+      github.event_name == 'issues' && github.event.action == 'labeled' &&
+      github.event.label.name == 'stage:build' &&
+      github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 60
     concurrency:
-      group: agent-issue-${{ github.event.client_payload.issue }}
+      group: agent-issue-${{ github.event.issue.number }}
       cancel-in-progress: true
     env:
-      ISSUE: ${{ github.event.client_payload.issue }}
-      BRANCH: agent/issue-${{ github.event.client_payload.issue }}
+      ISSUE: ${{ github.event.issue.number }}
+      BRANCH: agent/issue-${{ github.event.issue.number }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,8 +168,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
-            ISSUE: ${{ github.event.client_payload.issue }}
-            BRANCH: agent/issue-${{ github.event.client_payload.issue }} (already checked out)
+            ISSUE: ${{ github.event.issue.number }}
+            BRANCH: agent/issue-${{ github.event.issue.number }} (already checked out)
 
             Read .github/agent/build.md and follow it exactly.
           claude_args: |
@@ -179,13 +198,9 @@ jobs:
     env:
       BRANCH: ${{ github.event.workflow_run.head_branch }}
       RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      FAILED_RUN: ${{ github.event.workflow_run.id }}
       FAILED_WORKFLOW: ${{ github.event.workflow_run.name }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: .github/agent
-          persist-credentials: false
-
       - name: Decide whether to run a round
         id: gate
         env:
@@ -207,7 +222,7 @@ jobs:
           if [ "$rounds" -ge 3 ]; then
             gh pr edit "$BRANCH" --repo "$R" --add-label no-automerge
             gh issue comment "$ISSUE" --repo "$R" --body "Three fix rounds used and $FAILED_WORKFLOW still fails on the PR. Back to Idle; the PR is left open with \`no-automerge\`."
-            bash .github/agent/board.sh "$ISSUE" Idle
+            gh issue edit "$ISSUE" --repo "$R" --remove-label stage:build
             exit 0
           fi
           echo "ROUND=$((rounds + 1))" >> "$GITHUB_ENV"
