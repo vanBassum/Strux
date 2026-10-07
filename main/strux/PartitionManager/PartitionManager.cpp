@@ -454,7 +454,7 @@ CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
     if (!body.canLend())
     {
         ESP_LOGE(TAG, "transport cannot stream a partition body");
-        return CommandResult::Ok;
+        return CommandResult::ReplyIncomplete;
     }
 
     // Read flash straight into the reply frame the transport is about to send. The
@@ -468,14 +468,14 @@ CommandResult PartitionManager::Cmd_DownloadPartition(CommandContext& ctx)
         if (dst == nullptr)
         {
             ESP_LOGW(TAG, "Client disconnected during download");
-            return CommandResult::Ok;
+            return CommandResult::ReplyIncomplete;
         }
 
         size_t n = (p->size - offset < avail) ? (p->size - offset) : avail;
         if (esp_partition_read(p, offset, dst, n) != ESP_OK)
         {
             ESP_LOGE(TAG, "esp_partition_read failed at offset %lu", (unsigned long)offset);
-            return CommandResult::Ok;
+            return CommandResult::ReplyIncomplete;
         }
         body.commitOutput(n);
         offset += n;

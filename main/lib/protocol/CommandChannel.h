@@ -64,9 +64,10 @@ namespace protocol
             dispatcher.Execute(envelope, reply, channel, &gate, &failedArg);
         if (err != CommandResult::Ok)
         {
-            // Form failures refuse the request. REJECT ends the channel like FINAL
-            // does, so this composes with anything the handler already wrote — a
-            // refusal can always be last. The reason is prose, not a codec's
+            // Form failures refuse the request, and ReplyIncomplete says a reply
+            // that began was cut short: RESET after a header means a partial body.
+            // REJECT ends the channel like FINAL does, so this composes with
+            // anything the handler already wrote — a refusal can always be last. The reason is prose, not a codec's
             // syntax, so it reads the same whichever one asked.
             char buf[96];
             channel.reject(DescribeCommandResult(err, failedArg, buf, sizeof(buf)));
