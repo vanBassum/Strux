@@ -22,6 +22,10 @@ GitHub issue; implement it, autonomously, on the branch that is checked out.
    "Assumptions" in the result. Stop only when a product decision genuinely cannot
    be inferred, or the work would be unsafe.
 5. Hard rules -- break one and nothing is pushed:
+   - work goes to `dev`, not `main`: the branch is cut from `dev` and the PR targets
+     it. Never write a closing keyword (`closes`, `fixes`, `resolves` + `#N`) in a
+     commit message or the PR description -- the issue closes when a release ships
+     it, not when it merges;
    - never modify anything under `.github/`; if the plan needs it, stop (BLOCKED);
    - leave no uncommitted changes.
 6. Write `/tmp/agent/result.md`. First line exactly `READY` or `BLOCKED`.

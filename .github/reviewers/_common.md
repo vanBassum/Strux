@@ -47,7 +47,7 @@ merges; don't re-report what a compiler or test already catches.
   findings you reported (`[convention]` findings don't count; if your focus file
   defines which findings block, follow that instead):
   `<!-- claude-review: <your focus area> sha=<SHA> blocking=<N> -->`.
-  The PR is merged into `main` automatically when every reviewer reports
+  The PR is merged into its base branch automatically when every reviewer reports
   `blocking=0`, so don't leave out a `[bug]` or `[risk]` to get it merged, and
   don't tag a finding `[risk]` unless it really should stop the merge.
 - Write your comments in English.

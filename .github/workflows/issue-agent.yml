@@ -1,22 +1,27 @@
 name: Issue agent
 
-# The issue pipeline: Idle -> Analysis -> Plan review -> Build -> Acceptation.
+# The issue pipeline:
+#   Idle -> Analysis -> Plan review -> Build -> Ready for release -> Released
 #
 # The STAGE LABELS are what start work; the "Strux pipeline" project board (user
 # project #9) mirrors them and is the view, not the trigger. A user-owned project
 # emits no event an Action can run on, and a watcher or webhook bridge would be
 # infrastructure to host -- so the labels lead and dragging a card starts nothing.
 #
-#   no stage label      Idle. Nothing runs and no Claude credits are spent.
-#   stage:analysis      Claude reads the issue and the code, posts a plan. -> plan-review
-#   stage:plan-review   Bas reads it. Re-add stage:analysis to redo, remove to park,
-#                       add stage:build to approve.
-#   stage:build         Claude implements the plan on agent/issue-<N> and opens a PR.
-#                       The existing CI, reviewers and automerge take it from there;
-#                       a failed review or CI run gets up to 3 fix rounds.
-#   stage:acceptation   The PR merged and closed the issue. Bas accepts.
-# Anything the agent cannot finish (blocked, needs .github/, 3 rounds used) drops
-# the issue back to Idle with a comment saying why.
+# Each transition has ONE owner:
+#   (none)                    Idle. Nothing runs, no Claude credits.   new issue
+#   -> stage:analysis         Bas adds the label.
+#   -> stage:plan-review      the analysis job, when Claude has posted a plan.
+#   -> stage:build            Bas adds the label (approval).
+#   -> stage:ready-for-release  the `ready` job below, when the agent's PR has
+#                             squash-merged into `dev` (CI, the reviewers and
+#                             automerge decide that; up to 3 fix rounds). The
+#                             issue stays OPEN: merged is not released.
+#   -> stage:released         release.yml, when a FINAL tag (vX.Y.Z) containing the
+#                             issue's merge is published. It also closes the issue.
+#   -> Idle                   whatever job could not finish (blocked, needs .github/,
+#                             3 rounds used), with a comment saying why.
+# The board job only mirrors labels onto the board; it decides nothing.
 #
 # Only the repository owner adding a label starts Claude: anyone can open an issue
 # on this public repo, and an issue body is untrusted input.
@@ -32,7 +37,10 @@ name: Issue agent
 
 on:
   issues:
-    types: [opened, labeled, unlabeled, closed]
+    types: [opened, labeled, unlabeled]
+  pull_request:
+    types: [closed]
+    branches: [dev]
   workflow_run:
     workflows: ["Claude PR review", "CI"]
     types: [completed]
@@ -70,25 +78,38 @@ jobs:
       - name: Mirror the stage labels onto the board
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
-          ACTION: ${{ github.event.action }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
           R=$GITHUB_REPOSITORY
           labels=$(gh issue view "$ISSUE" --repo "$R" --json labels --jq '.labels[].name')
           has() { grep -qx "stage:$1" <<<"$labels"; }
-          if [ "$ACTION" = closed ] && has build; then
-            # The agent's PR merged and closed the issue.
-            gh issue edit "$ISSUE" --repo "$R" --add-label stage:acceptation --remove-label stage:build,stage:plan-review
-            labels="stage:acceptation"
-          fi
           # The most advanced stage wins, so a leftover earlier label is harmless.
-          if   has acceptation; then status=Acceptation
-          elif has build;       then status=Build
-          elif has plan-review; then status="Plan review"
-          elif has analysis;    then status=Analysis
-          else                       status=Idle
+          if   has released;          then status=Released
+          elif has ready-for-release; then status="Ready for release"
+          elif has build;             then status=Build
+          elif has plan-review;       then status="Plan review"
+          elif has analysis;          then status=Analysis
+          else                             status=Idle
           fi
           bash .github/agent/board.sh "$ISSUE" "$status"
+
+  # ---------------------------------------------------------------- ready
+  # The agent's PR squash-merged into dev: Build -> Ready for release. The issue
+  # stays open; release.yml closes it when a final release ships the merge.
+  ready:
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.merged &&
+      startsWith(github.event.pull_request.head.ref, 'agent/issue-')
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          ISSUE=${BRANCH#agent/issue-}
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label stage:ready-for-release --remove-label stage:build,stage:plan-review
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Merged into \`dev\` by #$PR. Ready for release: it ships, and this issue closes, with the next final release that contains it."
 
   # ---------------------------------------------------------------- analysis
   analysis:
@@ -168,6 +189,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: dev
           persist-credentials: false
           fetch-depth: 0
       - uses: ./.github/agent/setup
