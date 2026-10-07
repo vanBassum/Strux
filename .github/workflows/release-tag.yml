@@ -10,8 +10,11 @@ name: Release tag
 #
 # Invariant: main == the commit of the latest final vX.Y.Z tag. Two rulesets enforce
 # it: nobody may update or delete `main` or create, move or delete a `v*` tag --
-# except the release deploy key, whose private half is the RELEASE_DEPLOY_KEY secret
-# and is used by this workflow only. Pushes made with a deploy key DO start
+# except the release deploy key. Its private half is the RELEASE_DEPLOY_KEY secret of
+# the `release` ENVIRONMENT, which only `main` may deploy from: a workflow on any
+# other branch -- including a copy of this file -- cannot read the key. main itself
+# only changes through this workflow, so the file that holds the key is the one
+# that was released. Pushes made with a deploy key DO start
 # workflows, so release.yml runs on the tag this pushes.
 #
 # Because the deploy key bypasses main's required checks, this workflow checks CI
@@ -46,6 +49,8 @@ concurrency:
 
 jobs:
   tag:
+    if: github.ref == 'refs/heads/main'
+    environment: release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +70,9 @@ jobs:
           final="v$VERSION"
           git rev-parse -q --verify "refs/tags/$final" >/dev/null && { echo "::error::$final is already released"; exit 1; }
           git config user.name "strux-release"; git config user.email "noreply@anthropic.com"
+          # The file names release.yml builds: <project>-<board>-{factory,app}.bin.
+          project=$(grep -oP "^project\(\K[A-Za-z0-9_-]+(?=\))" CMakeLists.txt || true)
+          [ -n "$project" ] || { echo "::error::No project() name in CMakeLists.txt"; exit 1; }
           last_rc=$(git tag -l "$final-rc.*" | grep -E -- '-rc\.[0-9]+$' | sort -V | tail -n1 || true)
 
           ci_green() {  # the CI run for a push of exactly this commit succeeded
@@ -94,7 +102,7 @@ jobs:
               || { echo "::error::$last_rc has no published release (did its build fail?)"; exit 1; }
             assets=$(gh release view "$last_rc" --repo "$R" --json assets --jq '.assets[].name')
             for b in $(ls main/hardware/boards); do
-              for f in "Strux-$b-factory.bin" "Strux-$b-app.bin"; do
+              for f in "$project-$b-factory.bin" "$project-$b-app.bin"; do
                 grep -qx "$f" <<<"$assets" || { echo "::error::$last_rc is missing $f"; exit 1; }
               done
             done

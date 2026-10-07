@@ -126,7 +126,6 @@ jobs:
     if: "!cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped')"
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.AGENT_PAT }}
       TAG: ${{ github.ref_name }}
       # v1.2.0-rc.1 is a release candidate (a GitHub pre-release); v1.2.0 is final.
       PRERELEASE: ${{ contains(github.ref_name, '-') }}
@@ -150,13 +149,15 @@ jobs:
       # set must be complete -- two files per board folder. Fails closed.
       - name: Take the RC's firmware unchanged
         if: needs.build.result == 'skipped' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           rc=$(git tag --points-at "$TAG^{commit}" | grep -E -- '-rc\.[0-9]+$' | sort -V | tail -n1)
           [ -n "$rc" ] || { echo "::error::No release candidate on this commit; a final release ships an RC's binaries"; exit 1; }
           gh release download "$rc" --repo "$GITHUB_REPOSITORY" --dir dist --pattern '*.bin'
           for b in $(ls main/hardware/boards); do
-            for f in "Strux-$b-factory.bin" "Strux-$b-app.bin"; do
+            for f in "$PROJECT_NAME-$b-factory.bin" "$PROJECT_NAME-$b-app.bin"; do
               [ -f "dist/$f" ] || { echo "::error::$rc has no $f"; exit 1; }
             done
           done
@@ -165,10 +166,13 @@ jobs:
       # The issues this tag ships, by ancestry of their agent PR's merge commit.
       - name: List the included issues
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
         run: |
           bash .github/agent/release-issues.sh "$TAG" > /tmp/issues.txt
           {
-            echo "### Issues in this ${{ contains(github.ref_name, '-') && 'release candidate' || 'release' }}"
+            [ "$PRERELEASE" = true ] && kind="release candidate" || kind=release
+            echo "### Issues in this $kind"
             echo
             [ -s /tmp/issues.txt ] || echo "None from the issue pipeline."
             while read -r issue pr; do echo "- #$issue (PR #$pr)"; done < /tmp/issues.txt
@@ -183,13 +187,13 @@ jobs:
             echo; echo '```'; (cd dist && sha256sum *.bin); echo '```'
           } > /tmp/issues.md
           cat /tmp/issues.md
-          { cat /tmp/issues.md; echo; cat <<'FW'
+          { cat /tmp/issues.md; echo; sed "s/@PROJECT@/$PROJECT_NAME/g" <<'FW'
           ### Firmware files
 
           One set per board: `esp32_devkit` (ESP32-WROOM-32) and `esp32c3_supermini` (ESP32-C3).
 
-          - **`Strux-<board>-factory.bin`** — full image (bootloader + partition table + app, the web UI linked into it). For a first flash or a recovery, from offset zero: `esptool write-flash 0x0 <file>`.
-          - **`Strux-<board>-app.bin`** — application only. Upload it to the inactive `ota_0`/`ota_1` partition from the device's Firmware page.
+          - **`@PROJECT@-<board>-factory.bin`** — full image (bootloader + partition table + app, the web UI linked into it). For a first flash or a recovery, from offset zero: `esptool write-flash 0x0 <file>`.
+          - **`@PROJECT@-<board>-app.bin`** — application only. Upload it to the inactive `ota_0`/`ota_1` partition from the device's Firmware page.
           FW
           } > /tmp/release-body.md
 
@@ -197,7 +201,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ env.PRERELEASE == 'true' }}
           generate_release_notes: true
           body_path: /tmp/release-body.md
           files: dist/*.bin
@@ -206,6 +210,8 @@ jobs:
       # notes which candidate carries it; the issue stays open until a final ships.
       - name: Move the included issues
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.AGENT_PAT }}
         run: |
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG"
           while read -r issue pr; do
