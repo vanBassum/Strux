@@ -19,7 +19,7 @@ name: Issue agent
 # How a drag reaches this file: a user-owned project emits no event an Action or
 # webhook can see, so the watcher in .github/agent/bridge/ polls the board and
 # sends `repository_dispatch`
-# (pipeline-stage, {stage, issue}) when a listed human moves a card into Analysis
+# (pipeline-stage, {stage, issue}) when a card is moved into Analysis
 # or Build. The agent never moves a card there, so its own moves start nothing.
 #
 # Tokens: Claude itself only gets the read-mostly GITHUB_TOKEN. Pushing, opening
