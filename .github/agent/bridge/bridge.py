@@ -1,78 +1,91 @@
 """Project board -> GitHub Actions bridge.
 
-GitHub sends `projects_v2_item` webhooks only for ORGANIZATION projects, and only to
-an org webhook; nothing can start an Action from a board change directly. This is the
-missing hop: it receives that webhook and, when a human moves a card into Analysis or
-Build, sends a `repository_dispatch` to the issue's repository. Everything else
-(other columns, the agent's own moves, other projects) is ignored.
+Nothing GitHub emits can start an Action when a card moves on a USER-owned project:
+the `projects_v2_item` webhook exists for organization projects only. So this
+watches the board instead: every POLL_SECONDS it reads each card's Status and, when
+a card has newly arrived in Analysis or Build, sends a `repository_dispatch`
+(pipeline-stage, {stage, issue}) to the issue's repository.
+
+Only humans move cards INTO Analysis or Build -- the agent only ever moves them to
+Plan review, Acceptation or Idle -- so any arrival there is a human decision.
+
+What it remembers is in memory. On start it records the board as it is and
+dispatches nothing, so a restart never re-runs a stage; a card dragged while it was
+down is simply dragged again. An idle board costs one GraphQL call per poll: no
+Actions minutes, no Claude credits.
 
 Environment:
-  WEBHOOK_SECRET   the org webhook's secret (HMAC-SHA256 is verified on every call)
-  GITHUB_TOKEN     classic PAT: `repo` + `read:project` (the same AGENT_PAT works)
-  PROJECT_ID       node id of the pipeline project; other projects are ignored
-  HUMANS           comma-separated logins whose moves start work (default: vanBassum)
-  PORT             default 8080
+  GITHUB_TOKEN   classic PAT: `repo` + `read:project` (the AGENT_PAT works)
+  PROJECT_ID     node id of the pipeline project
+  POLL_SECONDS   default 30
 Standard library only, so the image is python:slim and nothing else.
 """
-import hashlib, hmac, json, os, sys, urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json, os, sys, time, urllib.request
 
-SECRET = os.environ["WEBHOOK_SECRET"].encode()
 TOKEN = os.environ["GITHUB_TOKEN"]
 PROJECT_ID = os.environ["PROJECT_ID"]
-HUMANS = {h.strip() for h in os.environ.get("HUMANS", "vanBassum").split(",")}
+POLL = int(os.environ.get("POLL_SECONDS", "30"))
 STAGES = {"Analysis": "analysis", "Build": "build"}
 
-QUERY = """query($id: ID!) { node(id: $id) { ... on ProjectV2Item {
-  project { id }
-  status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
-  content { ... on Issue { number repository { nameWithOwner } } } } } }"""
+QUERY = """query($p: ID!, $after: String) { node(id: $p) { ... on ProjectV2 {
+  items(first: 100, after: $after) {
+    pageInfo { hasNextPage endCursor }
+    nodes { id
+      status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } }
+      content { ... on Issue { number repository { nameWithOwner } } } } } } } }"""
 
 
-def github(method, path, body):
+def log(msg):
+    print(time.strftime("%Y-%m-%d %H:%M:%S"), msg, file=sys.stderr, flush=True)
+
+
+def github(path, body):
     req = urllib.request.Request(
-        "https://api.github.com" + path, method=method, data=json.dumps(body).encode(),
+        "https://api.github.com" + path, method="POST", data=json.dumps(body).encode(),
         headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"})
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=20) as r:
         return json.loads(r.read() or b"null")
 
 
-def handle(event, p):
-    if event != "projects_v2_item" or p.get("action") != "edited":
-        return "ignored: not an item edit"
-    if p.get("sender", {}).get("login") not in HUMANS:
-        return "ignored: not moved by a human on the list"
-    item = p["projects_v2_item"]
-    if item.get("project_node_id") != PROJECT_ID:
-        return "ignored: another project"
-    # Ask for the item's state now rather than trusting the payload's shape: the
-    # webhook says something changed, GraphQL says what it is.
-    node = github("POST", "/graphql", {"query": QUERY, "variables": {"id": item["node_id"]}})["data"]["node"]
-    stage = STAGES.get((node.get("status") or {}).get("name"))
-    issue = node.get("content") or {}
-    if not stage or "number" not in issue:
-        return "ignored: not an issue moved into Analysis or Build"
-    repo = issue["repository"]["nameWithOwner"]
-    github("POST", f"/repos/{repo}/dispatches",
-           {"event_type": "pipeline-stage", "client_payload": {"stage": stage, "issue": issue["number"]}})
-    return f"dispatched {stage} for {repo}#{issue['number']}"
+def board():
+    """{item id: (status, repo, issue number)} for every issue on the board."""
+    cards, after = {}, None
+    while True:
+        res = github("/graphql", {"query": QUERY, "variables": {"p": PROJECT_ID, "after": after}})
+        if res.get("errors"):
+            raise RuntimeError(res["errors"])
+        items = res["data"]["node"]["items"]
+        for n in items["nodes"]:
+            c = n.get("content") or {}
+            if "number" in c:
+                cards[n["id"]] = ((n.get("status") or {}).get("name"),
+                                  c["repository"]["nameWithOwner"], c["number"])
+        if not items["pageInfo"]["hasNextPage"]:
+            return cards
+        after = items["pageInfo"]["endCursor"]
 
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # health check
-        self.send_response(200); self.end_headers(); self.wfile.write(b"ok\n")
-
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        sig = "sha256=" + hmac.new(SECRET, body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, self.headers.get("X-Hub-Signature-256", "")):
-            self.send_response(401); self.end_headers(); return
+def main():
+    seen = board()
+    log(f"watching {len(seen)} cards every {POLL}s")
+    while True:
+        time.sleep(POLL)
         try:
-            msg, code = handle(self.headers.get("X-GitHub-Event"), json.loads(body)), 200
-        except Exception as e:  # GitHub shows this in the webhook's delivery log
-            msg, code = f"error: {e}", 500
-        print(msg, file=sys.stderr, flush=True)
-        self.send_response(code); self.end_headers(); self.wfile.write(msg.encode() + b"\n")
+            now = board()
+        except Exception as e:  # a network blip: keep the old view, try again
+            log(f"poll failed: {e}")
+            continue
+        for item, (status, repo, number) in now.items():
+            before = seen.get(item, (None,))[0]
+            if status in STAGES and status != before:
+                try:
+                    github(f"/repos/{repo}/dispatches", {"event_type": "pipeline-stage",
+                           "client_payload": {"stage": STAGES[status], "issue": number}})
+                    log(f"{repo}#{number}: {before} -> {status}, dispatched {STAGES[status]}")
+                except Exception as e:  # remember the old status, so the next poll retries
+                    log(f"{repo}#{number}: dispatch failed: {e}")
+                    now[item] = seen.get(item, (None, repo, number))
+        seen = now
 
 
-ThreadingHTTPServer(("", int(os.environ.get("PORT", "8080"))), Handler).serve_forever()
+main()

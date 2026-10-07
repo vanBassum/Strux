@@ -16,11 +16,11 @@ name: Issue agent
 # Anything the agent cannot finish (blocked, needs .github/, 3 rounds used) moves
 # the card back to Idle with a comment saying why.
 #
-# How a drag reaches this file: GitHub only emits board events for ORGANIZATION
-# projects, and only to an org webhook, never to an Action. The bridge in
-# .github/agent/bridge/ receives that webhook and sends `repository_dispatch`
+# How a drag reaches this file: a user-owned project emits no event an Action or
+# webhook can see, so the watcher in .github/agent/bridge/ polls the board and
+# sends `repository_dispatch`
 # (pipeline-stage, {stage, issue}) when a listed human moves a card into Analysis
-# or Build. The bridge filters the sender, so the agent's own moves start nothing.
+# or Build. The agent never moves a card there, so its own moves start nothing.
 #
 # Tokens: Claude itself only gets the read-mostly GITHUB_TOKEN. Pushing, opening
 # PRs, comments and the board use AGENT_PAT (classic PAT, `repo` + `project`) in
