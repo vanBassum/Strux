@@ -208,7 +208,7 @@ private:
 
     // ── Settings (registered with SettingsManager in Init) ──
     inline static StringSetting wifiSsid_    { "wifi.ssid",     "WiFi SSID",     "" };
-    inline static StringSetting wifiPassword_{ "wifi.password", "WiFi Password", "" };
+    inline static StringSetting wifiPassword_{ "wifi.password", "WiFi Password", "", SettingFlags::Secret };
 
     // On, because <name>.local is how you find a device whose address you were never
     // told, and answering the occasional multicast query costs a radio that never

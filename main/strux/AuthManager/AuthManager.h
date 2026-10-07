@@ -51,7 +51,7 @@ private:
     // setting: the key is the NVS address of a password somebody already set, and
     // renaming it would silently unlock every device that has one on the next
     // firmware update. The name is wrong and harmless; the rename is not.
-    inline static StringSetting webPassword_{ "web.password", "Web Password", "" };
+    inline static StringSetting webPassword_{ "web.password", "Web Password", "", SettingFlags::Secret };
 
     // Reads webPassword_ live by reference — see Authenticator.h.
     Authenticator auth_{ webPassword_ };

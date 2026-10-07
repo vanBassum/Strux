@@ -1092,6 +1092,8 @@ export interface SettingEntry {
   label: string
   type: SettingType
   value: string | number | boolean
+  hidden?: boolean
+  secret?: boolean
 }
 
 export interface SettingsResponse {

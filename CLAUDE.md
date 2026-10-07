@@ -213,6 +213,8 @@ uint32_t p = port_.Get();   // NVS value or the typed default
 
 `SettingsManager` is the NVS link; the settings UI is generated dynamically from the registered definitions.
 
+**Flags are declared with the setting and are advisory.** A trailing `SettingFlags` (`None`, `Hidden`, `Secret`, combined with `|`) says how a client should present it: `Secret` is drawn masked (`wifi.password`), `Hidden` is not drawn at all (`relay.token`). `settings list` still reports every setting with its value and adds `"hidden":true` / `"secret":true` when set - whatever can run a command is trusted to read and write everything, so the flags are for the UI and not an access boundary.
+
 **A key is at most 15 characters** — NVS's limit, asserted in `Register()` at *runtime*, so an over-long key compiles fine and then boot-loops the device on the assert. Nothing catches it earlier. `telemetry.enabled` (17) does not fit; `telem.enabled` does.
 
 ### Telemetry
