@@ -114,7 +114,10 @@ jobs:
     steps:
       - name: Merge into main when no reviewer found a blocking issue
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AGENT_PAT, not GITHUB_TOKEN: a merge made with GITHUB_TOKEN fires no
+          # further workflows, so CI on main and the issue agent's "closed ->
+          # Acceptation" step would never see it. Falls back while unset.
+          GH_TOKEN: ${{ secrets.AGENT_PAT || secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           # Keep in sync with the review matrix above.
