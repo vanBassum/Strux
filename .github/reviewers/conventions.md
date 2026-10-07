@@ -27,6 +27,8 @@ Look for:
   `board.cmake`.
 - **Template scope.** No MQTT / Home Assistant layer, no UI-module mechanism; the
   frontend is one SPA with hash routing and relative asset paths.
+- **Tests.** New pure logic in `main/lib/` (parsing, framing, argument handling) comes
+  with a case in `test/`, and pure frontend logic with a test beside it.
 - **Docs.** A change to a documented contract or convention updates `CLAUDE.md` in the
   same PR. `docs/reasoning/` notes are immutable: a PR that edits an existing note
   instead of adding a new one is a `[convention]`. `docs/next-up.md` holds only active
