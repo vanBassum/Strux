@@ -107,11 +107,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 50
-      # The plan's only way out. `//` in the Write rule below is an ABSOLUTE path;
-      # a single `/` is relative to the repository and silently denies the write.
-      - run: mkdir -p /tmp/agent
 
+      # The plan is Claude's FINAL MESSAGE, read from the action's execution log --
+      # not a file, so Analysis needs no write permission at all.
       - name: Claude analysis
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -123,16 +123,20 @@ jobs:
             Read .github/agent/analysis.md and follow it exactly.
           claude_args: |
             --max-turns 60
-            --allowedTools "Read,Grep,Glob,Write(//tmp/agent/**),Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(git log:*),Bash(git show:*)"
+            --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(git log:*),Bash(git show:*)"
 
       - name: Post the plan and move to Plan review
         if: always()
         env:
           GH_TOKEN: ${{ secrets.AGENT_PAT }}
           ISSUE: ${{ github.event.issue.number }}
+          EXEC: ${{ steps.claude.outputs.execution_file }}
         run: |
           R=$GITHUB_REPOSITORY
-          if [ -s /tmp/agent/plan.md ]; then
+          mkdir -p /tmp/agent
+          [ -f "$EXEC" ] && jq -r '[.[] | select(.type == "result")] | last | .result // empty' "$EXEC" > /tmp/agent/plan.md
+          if grep -q '^## Plan' /tmp/agent/plan.md 2>/dev/null; then
+            sed -i -n '/^## Plan/,$p' /tmp/agent/plan.md
             { cat /tmp/agent/plan.md; echo; echo "<!-- agent-plan -->"; } > /tmp/agent/comment.md
             gh issue comment "$ISSUE" --repo "$R" --body-file /tmp/agent/comment.md
             gh issue edit "$ISSUE" --repo "$R" --add-label stage:plan-review
@@ -177,6 +181,7 @@ jobs:
             Read .github/agent/build.md and follow it exactly.
           claude_args: |
             --max-turns 150
+            --add-dir /tmp/agent
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash"
 
       - name: Push and open the PR, or return to Idle
@@ -257,6 +262,7 @@ jobs:
             Read .github/agent/fix.md and follow it exactly.
           claude_args: |
             --max-turns 100
+            --add-dir /tmp/agent
             --allowedTools "Read,Write,Edit,Grep,Glob,Bash"
 
       - name: Push the fix, or return to Idle
