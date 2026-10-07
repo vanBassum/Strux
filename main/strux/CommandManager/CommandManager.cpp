@@ -67,6 +67,7 @@ const char* DescribeCommandResult(CommandResult e, const char* arg, char* buf, s
         snprintf(buf, cap, "missing required argument: %s", arg ? arg : "?");
         return buf;
     case CommandResult::MalformedRequest:  return "malformed request";
+    case CommandResult::ReplyIncomplete:   return "reply incomplete";
     case CommandResult::MalformedNumber:
         snprintf(buf, cap, "malformed number: %s", arg ? arg : "?");
         return buf;

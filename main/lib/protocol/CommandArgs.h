@@ -50,8 +50,9 @@ namespace protocol
     inline constexpr size_t MAX_COMMAND_NAME = 32;
 }
 
-/// Ways a REQUEST can be unusable. Closed set, owned by the framework -- anything a
-/// command author wants to add is meaning, and belongs in the reply.
+/// Ways a request can fail: unusable as sent, or fine but with a reply that could not
+/// be finished. Closed set, owned by the framework -- anything a command author wants
+/// to add is meaning, and belongs in the reply.
 enum class CommandResult : uint8_t
 {
     Ok = 0,
@@ -60,6 +61,7 @@ enum class CommandResult : uint8_t
     MalformedNumber,
     ArgumentTooLong,
     MalformedRequest,
+    ReplyIncomplete,   // the reply began and then stopped short: ends in RESET, not FINAL
 };
 
 enum class ArgType : uint8_t { String, UInt32, Int32, Float, Bool };

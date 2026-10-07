@@ -64,7 +64,7 @@ namespace protocol
             dispatcher.Execute(envelope, reply, channel, &gate, &failedArg);
         if (err != CommandResult::Ok)
         {
-            // Form failures refuse the request. REJECT ends the channel like FINAL
+            // Failures end the channel. REJECT ends the channel like FINAL
             // does, so this composes with anything the handler already wrote — a
             // refusal can always be last. The reason is prose, not a codec's
             // syntax, so it reads the same whichever one asked.
